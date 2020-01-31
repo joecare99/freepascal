@@ -291,17 +291,17 @@ interface
 
   type
     tperformrangecheck = (
-      rc_internal,  { never at all, internal conversion }
-      rc_explicit,  { no, but this is a user conversion and hence can still give warnings in some cases }
-      rc_default,   { only if range checking is enabled }
-      rc_always     { always }
+      rc_internal,  { nothing, internal conversion }
+      rc_explicit,  { no, but this is an explcit user conversion and hence can still give warnings in some cases (or errors in case of enums) }
+      rc_implicit,  { no, but this is an implicit conversion and hence can still give warnings/errors in some cases }
+      rc_yes        { yes }
     );
     {# If @var(l) isn't in the range of todef a range check error (if not explicit) is generated and
       the value is placed within the range
     }
     procedure adaptrange(todef : tdef;var l : tconstexprint; rangecheck: tperformrangecheck);
-    { for when used with nf_explicit/nf_internal nodeflags }
-    procedure adaptrange(todef : tdef;var l : tconstexprint; internal, explicit: boolean);
+    { for when used with nf_explicit/nf_internal/cs_check_range nodeflags }
+    procedure adaptrange(todef : tdef;var l : tconstexprint; internal, explicit, rangecheckstate: boolean);
 
     {# Returns the range of def, where @var(l) is the low-range and @var(h) is
       the high-range.
@@ -1107,11 +1107,10 @@ implementation
          if (l<lv) or (l>hv) then
            begin
              warned:=false;
-             if rangecheck in [rc_default,rc_always] then
+             if rangecheck in [rc_implicit,rc_yes] then
                begin
-                 if (rangecheck=rc_always) or
-                    (todef.typ=enumdef) or
-                    (cs_check_range in current_settings.localswitches) then
+                 if (rangecheck=rc_yes) or
+                    (todef.typ=enumdef) then
                    Message3(type_e_range_check_error_bounds,tostr(l),tostr(lv),tostr(hv))
                  else
                    Message3(type_w_range_check_error_bounds,tostr(l),tostr(lv),tostr(hv));
@@ -1165,14 +1164,16 @@ implementation
       end;
 
 
-    procedure adaptrange(todef: tdef; var l: tconstexprint; internal, explicit: boolean);
+    procedure adaptrange(todef: tdef; var l: tconstexprint; internal, explicit, rangecheckstate: boolean);
       begin
         if internal then
           adaptrange(todef, l, rc_internal)
         else if explicit then
           adaptrange(todef, l, rc_explicit)
+        else if not rangecheckstate then
+          adaptrange(todef, l, rc_implicit)
         else
-          adaptrange(todef, l, rc_default)
+          adaptrange(todef, l, rc_yes)
       end;
 
 
@@ -1336,8 +1337,9 @@ implementation
       begin
         result:=(p.typ=arraydef) and
                 not(is_special_array(p)) and
+                (tarraydef(p).elementdef.typ in [floatdef,orddef]) {and
                 (tarraydef(p).elementdef.typ=floatdef) and
-                (tfloatdef(tarraydef(p).elementdef).floattype in [s32real,s64real]);
+                (tfloatdef(tarraydef(p).elementdef).floattype in [s32real,s64real])};
       end;
 
 
@@ -1347,21 +1349,60 @@ implementation
 {$ifdef x86}
         result:= is_vector(p) and
                  (
-                  (tarraydef(p).elementdef.typ=floatdef) and
                   (
-                   (tarraydef(p).lowrange=0) and
-                   (tarraydef(p).highrange=3) and
-                   (tfloatdef(tarraydef(p).elementdef).floattype=s32real)
-                  )
-                 ) or
+                   (tarraydef(p).elementdef.typ=floatdef) and
+                   (
+                    (tarraydef(p).lowrange=0) and
+                    (tarraydef(p).highrange=3) and
+                    (tfloatdef(tarraydef(p).elementdef).floattype=s32real)
+                   )
+                  ) or
 
-                 (
-                  (tarraydef(p).elementdef.typ=floatdef) and
                   (
-                   (tarraydef(p).lowrange=0) and
-                   (tarraydef(p).highrange=1) and
-                   (tfloatdef(tarraydef(p).elementdef).floattype=s64real)
-                  )
+                   (tarraydef(p).elementdef.typ=floatdef) and
+                   (
+                    (tarraydef(p).lowrange=0) and
+                    (tarraydef(p).highrange=1) and
+                    (tfloatdef(tarraydef(p).elementdef).floattype=s64real)
+                   )
+                  ) {or
+
+                  // MMX registers
+                  (
+                   (tarraydef(p).elementdef.typ=floatdef) and
+                   (
+                    (tarraydef(p).lowrange=0) and
+                    (tarraydef(p).highrange=1) and
+                    (tfloatdef(tarraydef(p).elementdef).floattype=s32real)
+                   )
+                  ) or
+
+                  (
+                   (tarraydef(p).elementdef.typ=orddef) and
+                   (
+                    (tarraydef(p).lowrange=0) and
+                    (tarraydef(p).highrange=1) and
+                    (torddef(tarraydef(p).elementdef).ordtype in [s32bit,u32bit])
+                   )
+                  )  or
+
+                  (
+                   (tarraydef(p).elementdef.typ=orddef) and
+                   (
+                    (tarraydef(p).lowrange=0) and
+                    (tarraydef(p).highrange=3) and
+                    (torddef(tarraydef(p).elementdef).ordtype in [s16bit,u16bit])
+                   )
+                  ) or
+
+                  (
+                   (tarraydef(p).elementdef.typ=orddef) and
+                   (
+                    (tarraydef(p).lowrange=0) and
+                    (tarraydef(p).highrange=7) and
+                    (torddef(tarraydef(p).elementdef).ordtype in [s8bit,u8bit])
+                   )
+                  ) }
                  );
 {$else x86}
         result:=false;
@@ -1487,11 +1528,11 @@ implementation
             begin
               if is_dynamic_array(def) or not is_special_array(def) then
                 begin
-                  if (cs_support_vectors in current_settings.globalswitches) and is_vector(def) and ((TArrayDef(def).elementdef.typ = floatdef) and not (cs_fp_emulation in current_settings.moduleswitches)) then
+                  if is_vector(def) and ((TArrayDef(def).elementdef.typ = floatdef) and not (cs_fp_emulation in current_settings.moduleswitches)) then
                     begin
                       { Determine if, based on the floating-point type and the size
                         of the array, if it can be made into a vector }
-                      case TFloatDef(def).floattype of
+                      case tfloatdef(tarraydef(def).elementdef).floattype of
                         s32real:
                           result := float_array_cgsize(def.size);
                         s64real:
@@ -1568,19 +1609,19 @@ implementation
                     case TFloatDef(tarraydef(def).elementdef).floattype of
                       s32real:
                         case def.size of
-                          4:  result:=OS_MF32;
-                          16: result:=OS_MF128;
-                          32: result:=OS_MF256;
-                          64: result:=OS_MF512;
+                          4:  result:=OS_M32;
+                          16: result:=OS_M128;
+                          32: result:=OS_M256;
+                          64: result:=OS_M512;
                           else
                             internalerror(2017121400);
                         end;
                       s64real:
                         case def.size of
-                          8:  result:=OS_MD64;
-                          16: result:=OS_MD128;
-                          32: result:=OS_MD256;
-                          64: result:=OS_MD512;
+                          8:  result:=OS_M64;
+                          16: result:=OS_M128;
+                          32: result:=OS_M256;
+                          64: result:=OS_M512;
                           else
                             internalerror(2017121401);
                         end;

@@ -223,8 +223,8 @@ implementation
                        CGMessage(parser_e_case_lower_less_than_upper_bound);
                      if not casedeferror then
                        begin
-                         adaptrange(casedef,hl1,rc_default);
-                         adaptrange(casedef,hl2,rc_default);
+                         adaptrange(casedef,hl1,false,false,cs_check_range in current_settings.localswitches);
+                         adaptrange(casedef,hl2,false,false,cs_check_range in current_settings.localswitches);
                        end;
                    end
                  else
@@ -252,7 +252,7 @@ implementation
                    begin
                      hl1:=get_ordinal_value(p);
                      if not casedeferror then
-                       adaptrange(casedef,hl1,rc_default);
+                       adaptrange(casedef,hl1,false,false,cs_check_range in current_settings.localswitches);
                      casenode.addlabel(blockid,hl1,hl1);
                    end;
                end;
@@ -362,7 +362,7 @@ implementation
           begin
             if (hp.nodetype=ordconstn) and
                (fordef.typ<>errordef) then
-              adaptrange(fordef,tordconstnode(hp).value,rc_always);
+              adaptrange(fordef,tordconstnode(hp).value,false,false,true);
           end;
 
         function for_loop_create(hloopvar: tnode): tnode;
@@ -385,7 +385,10 @@ implementation
                ) and
                (hloopvar.resultdef.typ<>undefineddef)
                then
-               MessagePos(hloopvar.fileinfo,type_e_ordinal_expr_expected);
+               begin
+                 MessagePos(hloopvar.fileinfo,type_e_ordinal_expr_expected);
+                 hloopvar.resultdef:=generrordef;
+               end;
 
              hp:=hloopvar;
              while assigned(hp) and
@@ -504,6 +507,13 @@ implementation
                exclude(loopvarsym.varoptions,vo_is_loop_counter);
 
              result:=cfornode.create(hloopvar,hfrom,hto,hblock,backward);
+
+             { only in tp and mac pascal mode, we care about the value of the loop counter on loop exit
+
+               I am not sure though, if this is the right rule, at least in delphi the loop counter is undefined
+               on loop exit, we assume the same in all FPC modes }
+             if ([m_objfpc,m_fpc,m_delphi]*current_settings.modeswitches)<>[] then
+               Include(tfornode(Result).loopflags,lnf_dont_mind_loopvar_on_exit);
           end;
 
 

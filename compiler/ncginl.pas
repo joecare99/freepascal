@@ -66,6 +66,7 @@ interface
           procedure second_seg; virtual; abstract;
           procedure second_fma; virtual;
           procedure second_frac_real; virtual;
+          procedure second_high; virtual;
        protected
           function  second_incdec_tempregdef: tdef;virtual;
        end;
@@ -226,6 +227,8 @@ implementation
             in_neg_assign_x,
             in_not_assign_x:
                second_NegNot_assign;
+            in_high_x:
+              second_high;
             else
                pass_generate_code_cpu;
          end;
@@ -301,6 +304,42 @@ implementation
            location_reset(location,LOC_REGISTER,def_cgsize(resultdef));
            location.register:=hregister;
          end;
+      end;
+
+{*****************************************************************************
+                          HIGH(<dyn. array>) GENERIC HANDLING
+*****************************************************************************}
+
+    procedure tcginlinenode.second_high;
+      var
+        loadlab, nillab, donelab: tasmlabel;
+        hregister : tregister;
+        href : treference;
+      begin
+        secondpass(left);
+        if not(is_dynamic_array(left.resultdef)) then
+          Internalerror(2019122801);
+        { length in dynamic arrays is at offset -sizeof(pint) }
+        hlcg.location_force_reg(current_asmdata.CurrAsmList,left.location,left.resultdef,left.resultdef,false);
+        current_asmdata.getjumplabel(loadlab);
+        current_asmdata.getjumplabel(nillab);
+        current_asmdata.getjumplabel(donelab);
+        hlcg.a_cmp_const_reg_label(current_asmdata.CurrAsmList,left.resultdef,OC_EQ,0,left.location.register,nillab);
+        { volatility of the dyn. array refers to the volatility of the
+          string pointer, not of the string data }
+        hlcg.reference_reset_base(href,left.resultdef,left.location.register,-ossinttype.size,ctempposinvalid,ossinttype.alignment,[]);
+        { if the string pointer is nil, the length is 0 -> reuse the register
+          that originally held the string pointer for the length, so that we
+          can keep the original nil/0 as length in that case }
+        hregister:=cg.makeregsize(current_asmdata.CurrAsmList,left.location.register,def_cgsize(resultdef));
+        hlcg.a_load_ref_reg(current_asmdata.CurrAsmList,ossinttype,resultdef,href,hregister);
+        hlcg.a_jmp_always(current_asmdata.CurrAsmList,donelab);
+
+        cg.a_label(current_asmdata.CurrAsmList,nillab);
+        hlcg.a_op_const_reg(current_asmdata.CurrAsmList,OP_SUB,resultdef,1,hregister);
+        cg.a_label(current_asmdata.CurrAsmList,donelab);
+        location_reset(location,LOC_REGISTER,def_cgsize(resultdef));
+        location.register:=hregister;
       end;
 
 
@@ -412,7 +451,9 @@ implementation
             begin
 {$if not defined(cpu64bitalu) and not defined(cpuhighleveltarget)}
               if def_cgsize(left.resultdef) in [OS_64,OS_S64] then
-                cg64.a_op64_const_loc(current_asmdata.CurrAsmList,addsubop[inlinenumber],def_cgsize(left.resultdef),addvalue,tcallparanode(left).left.location)
+                { use addvalue.svalue here to avoid an internal error if addvalue is unsigned and overflows int64, see #35298,
+                  we are only interested in the bit pattern here }
+                cg64.a_op64_const_loc(current_asmdata.CurrAsmList,addsubop[inlinenumber],def_cgsize(left.resultdef),addvalue.svalue,tcallparanode(left).left.location)
               else
 {$endif not cpu64bitalu and not cpuhighleveltarget}
                 hlcg.a_op_const_loc(current_asmdata.CurrAsmList,addsubop[inlinenumber],left.resultdef,
@@ -920,7 +961,6 @@ implementation
       begin
         internalerror(2014032701);
       end;
-
 
 begin
    cinlinenode:=tcginlinenode;

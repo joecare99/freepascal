@@ -370,7 +370,7 @@ type
     Procedure TestUnit_DottedUnit;
     Procedure TestUnit_DottedExpr;
     Procedure TestUnit_DuplicateDottedUsesFail;
-    Procedure TestUnit_DuplicateUsesDiffNameFail;
+    Procedure TestUnit_DuplicateUsesDiffName;
     Procedure TestUnit_Unit1DotUnit2Fail;
     Procedure TestUnit_InFilename;
     Procedure TestUnit_InFilenameAliasDelphiFail;
@@ -379,11 +379,12 @@ type
     Procedure TestUnit_UnitNotFoundErrorPos;
     Procedure TestUnit_AccessIndirectUsedUnitFail;
     Procedure TestUnit_Intf1Impl2Intf1;
+    Procedure TestUnit_Intf1Impl2Intf1_Duplicate;
 
     // procs
     Procedure TestProcParam;
     Procedure TestProcParamAccess;
-    Procedure TestProcParamConstRefFail;
+    Procedure TestProcParamConstRef;
     Procedure TestFunctionResult;
     Procedure TestProcedureResultFail;
     Procedure TestProc_ArgVarPrecisionLossFail;
@@ -449,6 +450,8 @@ type
     Procedure TestProcedureExternal;
     Procedure TestProc_UntypedParam_Forward;
     Procedure TestProc_Varargs;
+    Procedure TestProc_VarargsOfT;
+    Procedure TestProc_VarargsOfTMismatch;
     Procedure TestProc_ParameterExprAccess;
     Procedure TestProc_FunctionResult_DeclProc;
     Procedure TestProc_TypeCastFunctionResult;
@@ -1462,7 +1465,9 @@ var
         if El.CustomData is TResolvedReference then
           Ref:=TResolvedReference(El.CustomData).Declaration
         else if El.CustomData is TPasPropertyScope then
-          Ref:=TPasPropertyScope(El.CustomData).AncestorProp;
+          Ref:=TPasPropertyScope(El.CustomData).AncestorProp
+        else if El.CustomData is TPasSpecializeTypeData then
+          Ref:=TPasSpecializeTypeData(El.CustomData).SpecializedType;
         if Ref<>nil then
           for j:=0 to LabelElements.Count-1 do
             begin
@@ -1478,11 +1483,17 @@ var
         El:=TPasElement(ReferenceElements[i]);
         write('Reference candidate for "',aMarker^.Identifier,'" at reference ',aMarker^.Filename,'(',aMarker^.Row,',',aMarker^.StartCol,'-',aMarker^.EndCol,')');
         write(' El=',GetObjName(El));
+        if EL is TPrimitiveExpr then
+          begin
+           writeln('CheckResolverReference ',TPrimitiveExpr(El).Value);
+          end;
         Ref:=nil;
         if El.CustomData is TResolvedReference then
           Ref:=TResolvedReference(El.CustomData).Declaration
         else if El.CustomData is TPasPropertyScope then
-          Ref:=TPasPropertyScope(El.CustomData).AncestorProp;
+          Ref:=TPasPropertyScope(El.CustomData).AncestorProp
+        else if El.CustomData is TPasSpecializeTypeData then
+          Ref:=TPasSpecializeTypeData(El.CustomData).SpecializedType;
         if Ref<>nil then
           begin
           write(' Decl=',GetObjName(Ref));
@@ -1490,7 +1501,7 @@ var
           write(',',Ref.SourceFilename,'(',aLine,',',aCol,')');
           end
         else
-          write(' has no TResolvedReference');
+          write(' has no TResolvedReference. El.CustomData=',GetObjName(El.CustomData));
         writeln;
         end;
       for i:=0 to LabelElements.Count-1 do
@@ -1533,7 +1544,7 @@ var
       for i:=0 to ReferenceElements.Count-1 do
         begin
         El:=TPasElement(ReferenceElements[i]);
-        //writeln('CheckDirectReference ',i,'/',ReferenceElements.Count,' ',GetTreeDesc(El,2));
+        //writeln('CheckDirectReference ',i,'/',ReferenceElements.Count,' ',GetTreeDbg(El,2));
         if El.ClassType=TPasVariable then
           begin
           if TPasVariable(El).VarType=nil then
@@ -1582,6 +1593,8 @@ var
         begin
         El:=TPasElement(ReferenceElements[i]);
         writeln('  Reference ',GetObjName(El),' at ',ResolverEngine.GetElementSourcePosStr(El));
+        //if EL is TPasVariable then
+        //  writeln('CheckDirectReference ',GetObjPath(TPasVariable(El).VarType),' ',ResolverEngine.GetElementSourcePosStr(TPasVariable(EL).VarType));
         end;
       RaiseErrorAtSrcMarker('wrong direct reference "'+aMarker^.Identifier+'"',aMarker);
     finally
@@ -2374,8 +2387,13 @@ function TCustomTestResolver.OnPasResolverFindUnit(SrcResolver: TPasResolver;
     {$ENDIF}
     CurEngine:=FindModuleWithFilename(aFilename);
     if CurEngine=nil then exit(false);
-    aModule:=InitUnit(CurEngine);
-    if aModule=nil then exit(false);
+    if CurEngine.Module=nil then
+      begin
+      aModule:=InitUnit(CurEngine);
+      if aModule=nil then exit(false);
+      end
+    else
+      aModule:=CurEngine.Module;
     OnPasResolverFindUnit:=aModule;
     Result:=true;
   end;
@@ -5912,7 +5930,7 @@ begin
     nParserDuplicateIdentifier);
 end;
 
-procedure TTestResolver.TestUnit_DuplicateUsesDiffNameFail;
+procedure TTestResolver.TestUnit_DuplicateUsesDiffName;
 begin
   MainFilename:='unitdots.main1.pas';
   AddModuleWithIntfImplSrc('unitdots.unit1.pp',
@@ -5930,8 +5948,7 @@ begin
   '  if unit1.j1=0 then ;',
   '  if unitdots.unit1.j1=0 then ;',
   '']);
-  CheckParserException('Duplicate identifier "unit1" at token ";" in file unitdots.main1.pas at line 2 column 27',
-    nParserDuplicateIdentifier);
+  ParseProgram;
 end;
 
 procedure TTestResolver.TestUnit_Unit1DotUnit2Fail;
@@ -6080,6 +6097,27 @@ begin
   ParseUnit;
 end;
 
+procedure TTestResolver.TestUnit_Intf1Impl2Intf1_Duplicate;
+begin
+  AddModuleWithIntfImplSrc('unit1.pp',
+    LinesToStr([
+    'type number = longint;']),
+    LinesToStr([
+    'uses afile;',
+    'procedure DoIt;',
+    'begin',
+    '  i:=3;',
+    'end;']));
+
+  StartUnit(true);
+  Add([
+  'interface',
+  'uses unit1, foo in ''unit1.pp'';',
+  'var i: number;',
+  'implementation']);
+  ParseUnit;
+end;
+
 procedure TTestResolver.TestProcParam;
 begin
   StartProgram(false);
@@ -6117,14 +6155,15 @@ begin
   ParseProgram;
 end;
 
-procedure TTestResolver.TestProcParamConstRefFail;
+procedure TTestResolver.TestProcParamConstRef;
 begin
   StartProgram(false);
-  Add('procedure Run(constref a: word);');
-  Add('begin');
-  Add('end;');
-  Add('begin');
-  CheckResolverException('not yet implemented: constref',nNotYetImplemented);
+  Add([
+  'procedure Run(constref a: word);',
+  'begin',
+  'end;',
+  'begin']);
+  ParseProgram;
 end;
 
 procedure TTestResolver.TestFunctionResult;
@@ -7342,6 +7381,41 @@ begin
   Add('  ProcC(4);');
   Add('  ProcC(5,''foo'');');
   ParseProgram;
+end;
+
+procedure TTestResolver.TestProc_VarargsOfT;
+begin
+  StartProgram(false);
+  Add([
+  'procedure ProcA(i:longint); varargs of word; external;',
+  'procedure ProcB; varargs of boolean; external;',
+  'procedure ProcC(i: longint = 17); varargs of double; external;',
+  'begin',
+  '  ProcA(1);',
+  '  ProcA(2,3);',
+  '  ProcA(4,5,6);',
+  '  ProcB;',
+  '  ProcB();',
+  '  ProcB(false);',
+  '  ProcB(true,false);',
+  '  ProcC;',
+  '  ProcC();',
+  '  ProcC(7);',
+  '  ProcC(8,9.3);',
+  '  ProcC(8,9.3,1.3);',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestProc_VarargsOfTMismatch;
+begin
+  StartProgram(false);
+  Add([
+  'procedure ProcA(i:longint); varargs of word; external;',
+  'begin',
+  '  ProcA(1,false);',
+  '']);
+  CheckResolverException('Incompatible type arg no. 2: Got "Boolean", expected "Word"',nIncompatibleTypeArgNo);
 end;
 
 procedure TTestResolver.TestProc_ParameterExprAccess;

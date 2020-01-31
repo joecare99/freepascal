@@ -964,7 +964,7 @@ begin
       SetHasErrors;
       exit;
     end;
-  ppufile.getsmallset(options);
+  ppufile.getset(tppuset1(options));
   if space<>'' then
    writeln([space,'------ ',s,' ------']);
   write([space,'Symtable options: ']);
@@ -1628,14 +1628,16 @@ const
          (mask:pi_has_except_table_data;
          str:' has except table data '),
          (mask:pi_needs_tls;
-         str:' uses TLS data pointer ')
+         str:' uses TLS data pointer '),
+         (mask:pi_uses_get_frame;
+         str:' uses get_frame')
   );
 var
   procinfooptions : tprocinfoflags;
   i      : longint;
   first  : boolean;
 begin
-  ppufile.getsmallset(procinfooptions);
+  ppufile.getset(tppuset4(procinfooptions));
   if procinfooptions<>[] then
    begin
      first:=true;
@@ -1681,7 +1683,7 @@ var
   i      : longint;
   first  : boolean;
 begin
-  ppufile.getsmallset(symoptions);
+  ppufile.getset(tppuset2(symoptions));
   if symoptions<>[] then
    begin
      if Def <> nil then
@@ -2729,7 +2731,8 @@ const
      { this should never happen for defs stored to a ppu file }
      (mask:df_not_registered_no_free;  str:'Unregistered/No free (invalid)'),
      (mask:df_llvm_no_struct_packing;  str:'LLVM unpacked struct'),
-     (mask:df_internal;       str:'Internal')
+     (mask:df_internal;       str:'Internal'),
+     (mask:df_has_global_ref; str:'Has Global Ref')
   );
   defstate : array[1..ord(high(tdefstate))] of tdefstateinfo=(
      (mask:ds_vmt_written;           str:'VMT Written'),
@@ -2765,7 +2768,7 @@ begin
   else
     readderef('');
   write  ([space,'       DefOptions : ']);
-  ppufile.getsmallset(defoptions);
+  ppufile.getset(tppuset2(defoptions));
   if defoptions<>[] then
     begin
       first:=true;
@@ -2782,7 +2785,7 @@ begin
   writeln;
 
   write  ([space,'        DefStates : ']);
-  ppufile.getsmallset(defstates);
+  ppufile.getset(tppuset1(defstates));
   if defstates<>[] then
     begin
       first:=true;
@@ -2800,7 +2803,7 @@ begin
 
   if df_genconstraint in defoptions then
     begin
-      ppufile.getsmallset(genconstr);
+      ppufile.getset(tppuset1(genconstr));
       write  ([space,'   GenConstraints : ']);
       if genconstr<>[] then
         begin
@@ -2997,7 +3000,7 @@ begin
   writeln;
   proccalloption:=tproccalloption(ppufile.getbyte);
   writeln([space,'       CallOption : ',proccalloptionStr[proccalloption]]);
-  ppufile.getnormalset(procoptions);
+  ppufile.getset(tppuset8(procoptions));
   if procoptions<>[] then
    begin
      if po_classmethod in procoptions then Include(ProcDef.Options, poClassMethod);
@@ -3068,10 +3071,23 @@ const
      (mask:vo_has_section;     str:'HasSection'),
      (mask:vo_force_finalize;  str:'ForceFinalize'),
      (mask:vo_is_default_var;  str:'DefaultIntrinsicVar'),
-     (mask:vo_is_far;          str:'IsFar')
+     (mask:vo_is_far;          str:'IsFar'),
+     (mask:vo_has_global_ref;  str:'HasGlobalRef')
+  );
+type
+  tvaraccessdesc=record
+    mask: tvarsymaccessflag;
+    str: string[30];
+  end;
+const
+  varaccessstr : array[ord(low(tvarsymaccessflag))..ord(high(tvarsymaccessflag))] of tvaraccessdesc=(
+    (mask: vsa_addr_taken;         str:'Address taken'),
+    (mask: vsa_different_scope;    str:'Accessed from different scope')
   );
 var
   i : longint;
+  accessflag: tvarsymaccessflag;
+  varsymaccessflags: tvarsymaccessflags;
   first : boolean;
 begin
   readcommonsym(s, VarDef);
@@ -3087,14 +3103,27 @@ begin
       end;
   writeln([space,'         Spez : ',Varspez2Str(i)]);
   writeln([space,'      Regable : ',Varregable2Str(ppufile.getbyte)]);
-  writeln([space,'   Addr Taken : ',(ppufile.getbyte<>0)]);
-  writeln([space,'Escaped Scope : ',(ppufile.getbyte<>0)]);
+  ppufile.getset(tppuset1(varsymaccessflags));
+  write([space, ' Access Flags : ']);
+  first:=true;
+  for i:=low(varaccessstr) to high(varaccessstr) do
+    begin
+      if varaccessstr[i].mask in varsymaccessflags then
+        begin
+          if first then
+            first:=false
+          else
+            write([', ']);
+          write([varaccessstr[i].str]);
+        end
+    end;
+  writeln;
   write  ([space,'     Var Type : ']);
   if VarDef <> nil then
     readderef('',VarDef.VarType)
   else
     readderef('');
-  ppufile.getsmallset(varoptions);
+  ppufile.getset(tppuset4(varoptions));
   if varoptions<>[] then
    begin
      if (VarDef <> nil) and (VarDef.DefType = dtParam) and (vo_is_hidden_para in varoptions) then
@@ -3153,7 +3182,7 @@ var
   i      : longint;
   first  : boolean;
 begin
-  ppufile.getsmallset(current_objectoptions);
+  ppufile.getset(tppuset4(current_objectoptions));
   if current_objectoptions<>[] then
    begin
      if ObjDef <> nil then
@@ -3188,13 +3217,15 @@ const
     (mask:pio_has_inlininginfo; str:'HasInliningInfo'),
     (mask:pio_inline_not_possible; str:'InlineNotPossible'),
     (mask:pio_nested_access; str:'NestedAccess'),
-    (mask:pio_thunk; str:'Thunk')
+    (mask:pio_thunk; str:'Thunk'),
+    (mask:pio_fastmath; str:'FastMath'),
+    (mask:pio_inline_forbidden; str:'InlineForbidden')
   );
 var
   i: timplprocoption;
   first: boolean;
 begin
-  ppufile.getsmallset(implprocoptions);
+  ppufile.getset(tppuset1(implprocoptions));
   if implprocoptions<>[] then
     begin
       first:=true;
@@ -3224,14 +3255,15 @@ const
    { ado_IsConstructor      } 'IsConstructor',
    { ado_IsArrayOfConst     } 'ArrayOfConst',
    { ado_IsConstString      } 'ConstString',
-   { ado_IsBitPacked        } 'BitPacked'
+   { ado_IsBitPacked        } 'BitPacked',
+   { ado_IsVector           } 'Vector'
   );
 var
   symoptions: tarraydefoptions;
   i: tarraydefoption;
   first: boolean;
 begin
-  ppufile.getsmallset(symoptions);
+  ppufile.getset(tppuset1(symoptions));
   if symoptions<>[] then
    begin
      if ado_IsDynamicArray in symoptions then Include(ArrayDef.Options, aoDynamic);
@@ -3284,7 +3316,7 @@ var
   i      : longint;
   first  : boolean;
 begin
-  ppufile.getsmallset(result);
+  ppufile.getset(tppuset2(result));
   if result<>[] then
    begin
      first:=true;
@@ -3329,7 +3361,7 @@ var
   i      : longint;
   first  : boolean;
 begin
-  ppufile.getsmallset(result);
+  ppufile.getset(tppuset1(result));
   if result<>[] then
    begin
      first:=true;
@@ -4645,7 +4677,7 @@ var
   i      : longint;
   first  : boolean;
 begin
-  ppufile.getsmallset(moduleoptions);
+  ppufile.getset(tppuset1(moduleoptions));
   if moduleoptions<>[] then
    begin
      first:=true;
@@ -4682,15 +4714,6 @@ begin
        b:=readentry;
        case b of
 
-         ibextraheader:
-           begin
-             CurUnit.LongVersion:=cardinal(getlongint);
-             Writeln(['LongVersion: ',CurUnit.LongVersion]);
-             getsmallset(CurUnit.ModuleFlags);
-             if mf_symansistr in CurUnit.ModuleFlags then
-               SymAnsiStr:=true;
-           end;
-
          ibmodulename :
            begin
              CurUnit.Name:=getstring;
@@ -4700,7 +4723,7 @@ begin
 
          ibfeatures :
            begin
-             getsmallset(features);
+             getset(tppuset4(features));
              Writeln('Features: ');
              for feature:=low(tfeatures) to high(tfeature) do
                if feature in features then
@@ -4880,8 +4903,10 @@ begin
     exit;
   CurUnit.LongVersion:=cardinal(ppufile.getlongint);
   Writeln(['LongVersion: ',CurUnit.LongVersion]);
-  ppufile.getsmallset(CurUnit.ModuleFlags);
-  result:=ppufile.EndOfEntry;
+  ppufile.getset(tppuset4(CurUnit.ModuleFlags));
+  result:=ppufile.EndOfEntry and (CurUnit.LongVersion=CurrentPPULongVersion);
+  if mf_symansistr in CurUnit.ModuleFlags then
+    SymAnsiStr:=true;
 end;
 
 procedure dofile (filename : string);

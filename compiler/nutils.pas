@@ -102,7 +102,7 @@ interface
       which was determined during an earlier typecheck pass (because the value
       may e.g. be a parameter to a call, which needs to be of the declared
       parameter type) }
-    function create_simplified_ord_const(const value: tconstexprint; def: tdef; forinline: boolean): tnode;
+    function create_simplified_ord_const(const value: tconstexprint; def: tdef; forinline, rangecheck: boolean): tnode;
 
     { returns true if n is only a tree of administrative nodes
       containing no code }
@@ -570,7 +570,8 @@ implementation
         if assigned(srsym) then
           begin
             result:=cloadnode.create(srsym,srsym.owner);
-            include(tloadnode(result).loadnodeflags,loadnf_load_self_pointer);
+            if is_object(tabstractvarsym(srsym).vardef) or is_record(tabstractvarsym(srsym).vardef) then
+              include(tloadnode(result).loadnodeflags,loadnf_load_addr);
           end
         else
           begin
@@ -777,9 +778,12 @@ implementation
                   if (tloadnode(p).symtableentry.typ=staticvarsym) and
                      (vo_is_thread_var in tstaticvarsym(tloadnode(p).symtableentry).varoptions) then
                     inc(result,5)
-                  else
+                  else if not((tloadnode(p).symtableentry.typ in [staticvarsym,localvarsym,paravarsym,fieldvarsym]) and
+                    (tabstractvarsym(tloadnode(p).symtableentry).varregable in [vr_intreg,vr_mmreg,vr_fpureg])) then
                     inc(result);
-                  if (tloadnode(p).symtableentry.typ=paravarsym) and tloadnode(p).is_addr_param_load then
+                  if (tloadnode(p).symtableentry.typ=paravarsym) and
+                     not(tabstractvarsym(tloadnode(p).symtableentry).varregable=vr_addr) and
+                     tloadnode(p).is_addr_param_load then
                     inc(result);
                   if (result >= NODE_COMPLEXITY_INF) then
                     result := NODE_COMPLEXITY_INF;
@@ -790,7 +794,9 @@ implementation
                   if is_implicit_pointer_object_type(tunarynode(p).left.resultdef) or
                     is_bitpacked_access(p) then
                     inc(result,2)
-                  else if tstoreddef(p.resultdef).is_intregable then
+                  { non-packed, int. regable records cause no extra
+                    overhead no overhead if the fields are aligned to register boundaries }
+                  else if tstoreddef(p.resultdef).is_intregable and (tsubscriptnode(p).vs.fieldoffset mod sizeof(aint)<>0) then
                     inc(result,1);
                   if (result = NODE_COMPLEXITY_INF) then
                     exit;
@@ -1136,12 +1142,12 @@ implementation
       end;
 
 
-    function create_simplified_ord_const(const value: tconstexprint; def: tdef; forinline: boolean): tnode;
+    function create_simplified_ord_const(const value: tconstexprint; def: tdef; forinline, rangecheck: boolean): tnode;
       begin
         if not forinline then
           result:=genintconstnode(value)
         else
-          result:=cordconstnode.create(value,def,cs_check_range in current_settings.localswitches);
+          result:=cordconstnode.create(value,def,rangecheck);
       end;
 
 

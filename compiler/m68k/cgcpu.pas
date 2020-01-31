@@ -576,8 +576,8 @@ unit cgcpu;
         pd:=search_system_proc(name);
         paraloc1.init;
         paraloc2.init;
-        paramanager.getintparaloc(list,pd,1,paraloc1);
-        paramanager.getintparaloc(list,pd,2,paraloc2);
+        paramanager.getcgtempparaloc(list,pd,1,paraloc1);
+        paramanager.getcgtempparaloc(list,pd,2,paraloc2);
         a_load_const_cgpara(list,size,a,paraloc2);
         a_load_reg_cgpara(list,OS_32,reg,paraloc1);
         paramanager.freecgpara(list,paraloc2);
@@ -600,8 +600,8 @@ unit cgcpu;
         pd:=search_system_proc(name);
         paraloc1.init;
         paraloc2.init;
-        paramanager.getintparaloc(list,pd,1,paraloc1);
-        paramanager.getintparaloc(list,pd,2,paraloc2);
+        paramanager.getcgtempparaloc(list,pd,1,paraloc1);
+        paramanager.getcgtempparaloc(list,pd,2,paraloc2);
         a_load_reg_cgpara(list,OS_32,reg1,paraloc2);
         a_load_reg_cgpara(list,OS_32,reg2,paraloc1);
         paramanager.freecgpara(list,paraloc2);
@@ -2170,6 +2170,8 @@ unit cgcpu;
                   else
                     list.concat(taicpu.op_const_reg(A_AND,S_W,$FF,reg));
                 end;
+              else
+                ;
             end;
           OS_S32, OS_32:
             case _oldsize of
@@ -2212,7 +2214,11 @@ unit cgcpu;
                   //list.concat(tai_comment.create(strpnew('zero extend word')));
                   list.concat(taicpu.op_const_reg(A_AND,S_L,$FFFF,reg));
                 end;
+              else
+                ;
             end;
+          else
+            ;
         end; { otherwise the size is already correct }
       end; 
 
@@ -2455,6 +2461,8 @@ unit cgcpu;
               list.concat(taicpu.op_reg(opcode,S_L,regdst.reglo));
               list.concat(taicpu.op_reg(xopcode,S_L,regdst.reghi));
             end;
+          else
+            ;
         end; { end case }
       end;
 
@@ -2577,6 +2585,8 @@ unit cgcpu;
           { these should have been handled already by earlier passes }
           OP_NOT,OP_NEG:
             internalerror(2012110403);
+          else
+            ;
         end; { end case }
       end;
 

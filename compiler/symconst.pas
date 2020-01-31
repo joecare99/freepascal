@@ -232,7 +232,9 @@ type
       because we have to access this information in the symtable unit }
     df_llvm_no_struct_packing,
     { internal def that's not for any export }
-    df_internal
+    df_internal,
+    { the local def is referenced from a public function }
+    df_has_global_ref
   );
   tdefoptions=set of tdefoption;
 
@@ -438,7 +440,11 @@ type
     { a nested routine accesses a local variable from this routine }
     pio_nested_access,
     { a stub/thunk }
-    pio_thunk
+    pio_thunk,
+    { compiled with fastmath enabled }
+    pio_fastmath,
+    { inline is forbidden (calls get_frame) }
+    pio_inline_forbidden
   );
   timplprocoptions = set of timplprocoption;
 
@@ -553,7 +559,8 @@ type
     ado_IsConstructor,      // array constructor (e.g. something = [1,2,3])
     ado_IsArrayOfConst,     // array of const
     ado_IsConstString,      // string constant
-    ado_IsBitPacked         // bitpacked array
+    ado_IsBitPacked,        // bitpacked array
+    ado_IsVector            // Vector
   );
   tarraydefoptions=set of tarraydefoption;
 
@@ -607,9 +614,20 @@ type
       sections }
     vo_is_default_var,
     { i8086 'external far' (can only be used in combination with vo_is_external) }
-    vo_is_far
+    vo_is_far,
+    { a static symbol that is referenced from a global function }
+    vo_has_global_ref
   );
   tvaroptions=set of tvaroption;
+
+  { variable symbol access flags }
+  tvarsymaccessflag = (
+    { this symbol's address has been taken }
+    vsa_addr_taken,
+    { this symbol is accessed from a different scope }
+    vsa_different_scope
+  );
+  tvarsymaccessflags = set of tvarsymaccessflag;
 
   tmanagementoperator=(mop_none,
     mop_initialize,

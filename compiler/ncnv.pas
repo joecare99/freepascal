@@ -318,7 +318,7 @@ implementation
 
    uses
       globtype,systems,constexp,compinnr,
-      cutils,verbose,globals,widestr,
+      cutils,verbose,globals,widestr,ppu,
       symconst,symdef,symsym,symcpu,symtable,
       ncon,ncal,nset,nadd,nmem,nmat,nbas,nutils,ninl,
       cgbase,procinfo,
@@ -843,10 +843,12 @@ implementation
               if iscvarargs then
                 p:=ctypeconvnode.create(p,voidpointertype);
             objectdef :
-              if (iscvarargs and
-                  not is_objc_class_or_protocol(p.resultdef)) or
+              if is_objc_class_or_protocol(p.resultdef) then
+                p:=ctypeconvnode.create(p,voidpointertype)
+              else if iscvarargs or
                  is_object(p.resultdef) then
-                CGMessagePos1(p.fileinfo,type_e_wrong_type_in_array_constructor,p.resultdef.typename);
+                CGMessagePos1(p.fileinfo,type_e_wrong_type_in_array_constructor,p.resultdef.typename)
+              else
             else
               CGMessagePos1(p.fileinfo,type_e_wrong_type_in_array_constructor,p.resultdef.typename);
           end;
@@ -990,7 +992,7 @@ implementation
         inherited ppuload(t,ppufile);
         ppufile.getderef(totypedefderef);
         convtype:=tconverttype(ppufile.getbyte);
-        ppufile.getsmallset(convnodeflags);
+        ppufile.getset(tppuset1(convnodeflags));
       end;
 
 
@@ -999,7 +1001,7 @@ implementation
         inherited ppuwrite(ppufile);
         ppufile.putderef(totypedefderef);
         ppufile.putbyte(byte(convtype));
-        ppufile.putsmallset(convnodeflags);
+        ppufile.putset(tppuset1(convnodeflags));
       end;
 
 
@@ -1488,7 +1490,7 @@ implementation
                     v:=v div 10000;
                  end
                else if (resultdef.typ in [orddef,enumdef]) then
-                 adaptrange(resultdef,v,([nf_internal,nf_absolute]*flags)<>[],nf_explicit in flags);
+                 adaptrange(resultdef,v,([nf_internal,nf_absolute]*flags)<>[],nf_explicit in flags,cs_check_range in localswitches);
                result:=cordconstnode.create(v,resultdef,false);
              end;
          end
@@ -1578,17 +1580,25 @@ implementation
         if not is_currency(resultdef) then
           internalerror(200304221);
         result:=nil;
-        left:=caddnode.create(muln,left,crealconstnode.create(10000.0,left.resultdef));
-        include(left.flags,nf_is_currency);
-        typecheckpass(left);
-        { Convert constants directly, else call Round() }
-        if left.nodetype=realconstn then
-          result:=cordconstnode.create(round(trealconstnode(left).value_real),resultdef,false)
+        if not(nf_internal in flags) then
+          begin
+            left:=caddnode.create(muln,left,crealconstnode.create(10000.0,left.resultdef));
+            include(left.flags,nf_is_currency);
+            { Convert constants directly, else call Round() }
+            if left.nodetype=realconstn then
+              result:=cordconstnode.create(round(trealconstnode(left).value_real),resultdef,false)
+            else
+              begin
+                result:=cinlinenode.create(in_round_real,false,left);
+                { Internal type cast to currency }
+                result:=ctypeconvnode.create_internal(result,s64currencytype);
+                left:=nil;
+              end
+          end
         else
           begin
-            result:=cinlinenode.create(in_round_real,false,left);
-            { Internal type cast to currency }
-            result:=ctypeconvnode.create_internal(result,s64currencytype);
+            include(left.flags,nf_is_currency);
+            result:=left;
             left:=nil;
           end;
       end;
@@ -1597,19 +1607,25 @@ implementation
     function ttypeconvnode.typecheck_real_to_real : tnode;
       begin
          result:=nil;
-         if is_currency(left.resultdef) and not(is_currency(resultdef)) then
+         if not(nf_internal in flags) then
            begin
-             left:=caddnode.create(slashn,left,crealconstnode.create(10000.0,left.resultdef));
-             include(left.flags,nf_is_currency);
-             typecheckpass(left);
+             if is_currency(left.resultdef) and not(is_currency(resultdef)) then
+               begin
+                 left:=caddnode.create(slashn,left,crealconstnode.create(10000.0,left.resultdef));
+                 include(left.flags,nf_is_currency);
+                 typecheckpass(left);
+               end
+             else
+               if is_currency(resultdef) and not(is_currency(left.resultdef)) then
+                 begin
+                   left:=caddnode.create(muln,left,crealconstnode.create(10000.0,left.resultdef));
+                   include(left.flags,nf_is_currency);
+                   include(flags,nf_is_currency);
+                   typecheckpass(left);
+                 end;
            end
          else
-           if is_currency(resultdef) and not(is_currency(left.resultdef)) then
-             begin
-               left:=caddnode.create(muln,left,crealconstnode.create(10000.0,left.resultdef));
-               include(left.flags,nf_is_currency);
-               typecheckpass(left);
-             end;
+           include(flags,nf_is_currency);
       end;
 
 
@@ -2513,7 +2529,7 @@ implementation
               te_convert_operator :
                 begin
                   include(current_procinfo.flags,pi_do_call);
-                  addsymref(aprocdef.procsym);
+                  addsymref(aprocdef.procsym,aprocdef);
                   hp:=ccallnode.create(ccallparanode.create(left,nil),Tprocsym(aprocdef.procsym),nil,nil,[],nil);
                   { tell explicitly which def we must use !! (PM) }
                   tcallnode(hp).procdefinition:=aprocdef;
@@ -2931,6 +2947,7 @@ implementation
     function ttypeconvnode.simplify(forinline : boolean): tnode;
       var
         hp: tnode;
+        v: Tconstexprint;
 {$ifndef CPUNO32BITOPS}
         foundsint: boolean;
 {$endif not CPUNO32BITOPS}
@@ -2990,6 +3007,8 @@ implementation
                 begin
                   hp:=result;
                   result:=crealconstnode.create(trealconstnode(hp).value_real,resultdef);
+                  if nf_is_currency in hp.flags then
+                    include(result.flags,nf_is_currency);
                   if ([nf_explicit,nf_internal] * flags <> []) then
                     include(result.flags, nf_explicit);
                   hp.free;
@@ -3081,7 +3100,7 @@ implementation
                        { for constant values on absolute variables, swapping is required }
                        if (target_info.endian = endian_big) and (nf_absolute in flags) then
                          swap_const_value(tordconstnode(left).value,tordconstnode(left).resultdef.size);
-                       adaptrange(resultdef,tordconstnode(left).value,([nf_internal,nf_absolute]*flags)<>[],nf_explicit in flags);
+                       adaptrange(resultdef,tordconstnode(left).value,([nf_internal,nf_absolute]*flags)<>[],nf_explicit in flags,cs_check_range in localswitches);
                        { swap value back, but according to new type }
                        if (target_info.endian = endian_big) and (nf_absolute in flags) then
                          swap_const_value(tordconstnode(left).value,resultdef.size);
@@ -3115,6 +3134,15 @@ implementation
                    result:=left;
                    left:=nil;
                    exit;
+                end
+              else if (convtype=tc_int_2_int) and
+                is_currency(resultdef) then
+                begin
+                  v:=tordconstnode(left).value;
+                  if not(nf_internal in flags) and not(is_currency(left.resultdef)) then
+                    v:=v*10000;
+                  result:=cordconstnode.create(v,resultdef,false);
+                  exit;
                 end;
             end;
 
@@ -3151,6 +3179,7 @@ implementation
         { must be done before code below, because we need the
           typeconversions for ordconstn's as well }
         case convtype of
+          tc_int_2_bool,
           tc_int_2_int:
             begin
               if (localswitches * [cs_check_range,cs_check_overflow] = []) and

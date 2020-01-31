@@ -37,7 +37,10 @@ interface
 
        tloadnodeflags = (
          loadnf_is_self,
-         loadnf_load_self_pointer,
+         { tell the load node the address of the symbol into the location, i.e. location^ must
+           be used to access the symbol
+           this is for example needed to load self for objects }
+         loadnf_load_addr,
          loadnf_inherited,
          { the loadnode is generated internally and a varspez=vs_const should be ignore,
            this requires that the parameter is actually passed by value
@@ -184,6 +187,7 @@ implementation
 
     uses
       verbose,globtype,globals,systems,constexp,compinnr,
+      ppu,
       symtable,
       defutil,defcmp,
       cpuinfo,
@@ -231,7 +235,7 @@ implementation
         ppufile.getderef(symtableentryderef);
         symtable:=nil;
         ppufile.getderef(fprocdefderef);
-        ppufile.getsmallset(loadnodeflags);
+        ppufile.getset(tppuset1(loadnodeflags));
       end;
 
 
@@ -240,7 +244,7 @@ implementation
         inherited ppuwrite(ppufile);
         ppufile.putderef(symtableentryderef);
         ppufile.putderef(fprocdefderef);
-        ppufile.putsmallset(loadnodeflags);
+        ppufile.putset(tppuset1(loadnodeflags));
       end;
 
 
@@ -304,7 +308,7 @@ implementation
         result:=(symtable.symtabletype=parasymtable) and
                 (symtableentry.typ=paravarsym) and
                 not(vo_has_local_copy in tparavarsym(symtableentry).varoptions) and
-                not(loadnf_load_self_pointer in loadnodeflags) and
+                not(loadnf_load_addr in loadnodeflags) and
                 paramanager.push_addr_param(tparavarsym(symtableentry).varspez,tparavarsym(symtableentry).vardef,tprocdef(symtable.defowner).proccalloption);
       end;
 
@@ -360,18 +364,16 @@ implementation
                    make_not_regable(self,[ra_different_scope]);
                  end;
                resultdef:=tabstractvarsym(symtableentry).vardef;
-               { self for objects is passed as var-parameter on the caller
+
+               { e.g. self for objects is passed as var-parameter on the caller
                  side, but on the callee-side we use it as a pointer ->
                  adjust }
-               if (vo_is_self in tabstractvarsym(symtableentry).varoptions) then
-                 begin
-                   if (is_object(resultdef) or is_record(resultdef)) and
-                      (loadnf_load_self_pointer in loadnodeflags) then
-                     resultdef:=cpointerdef.getreusable(resultdef)
-                   else if (resultdef=objc_idtype) and
-                      (po_classmethod in tprocdef(symtableentry.owner.defowner).procoptions) then
-                     resultdef:=cclassrefdef.create(tprocdef(symtableentry.owner.defowner).struct)
-                 end
+               if (loadnf_load_addr in loadnodeflags) then
+                 resultdef:=cpointerdef.getreusable(resultdef);
+
+               if (vo_is_self in tabstractvarsym(symtableentry).varoptions) and (resultdef=objc_idtype) and
+                 (po_classmethod in tprocdef(symtableentry.owner.defowner).procoptions) then
+                 resultdef:=cclassrefdef.create(tprocdef(symtableentry.owner.defowner).struct)
              end;
            procsym :
              begin

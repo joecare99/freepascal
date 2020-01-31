@@ -952,7 +952,14 @@ begin
         if not ParseMacVersionMin(MacOSXVersionMin,iPhoneOSVersionMin,'MAC_OS_X_VERSION_MIN_REQUIRED',envstr,false) then
           Message1(option_invalid_macosx_deployment_target,envstr)
         else
-          exit;
+          begin
+{$ifdef llvm}
+             { We only support libunwind as part of libsystem, which happened in Mac OS X 10.6 }
+            if CompareVersionStrings(MacOSXVersionMin,'10.6')<=0 then
+              Message1(option_invalid_macosx_deployment_target,envstr);
+{$endif}
+            exit;
+          end;
     end
   else
     begin
@@ -970,42 +977,28 @@ begin
         set_system_compvar('MAC_OS_X_VERSION_MIN_REQUIRED','1030');
         MacOSXVersionMin:='10.3';
       end;
-    system_powerpc64_darwin,
-    system_i386_darwin:
+    system_powerpc64_darwin:
       begin
-{$ifdef llvm}
-        { We only support libunwind as part of libsystem }
-        set_system_compvar('MAC_OS_X_VERSION_MIN_REQUIRED','1060');
-        MacOSXVersionMin:='10.6';
-{$else llvm}
         set_system_compvar('MAC_OS_X_VERSION_MIN_REQUIRED','1040');
         MacOSXVersionMin:='10.4';
-{$endif llvm}
       end;
+    system_i386_darwin,
     system_x86_64_darwin:
       begin
-{$ifdef llvm}
-        { We only support libunwind as part of libsystem }
-        set_system_compvar('MAC_OS_X_VERSION_MIN_REQUIRED','1060');
-        MacOSXVersionMin:='10.6';
-{$else llvm}
-        { actually already works on 10.4, but it's unlikely any 10.4 system
-          with an x86-64 is still in use, so don't default to it }
-        set_system_compvar('MAC_OS_X_VERSION_MIN_REQUIRED','1050');
-        MacOSXVersionMin:='10.5';
-{$endif llvm}
+        set_system_compvar('MAC_OS_X_VERSION_MIN_REQUIRED','1080');
+        MacOSXVersionMin:='10.8';
       end;
     system_arm_darwin,
     system_i386_iphonesim:
       begin
-        set_system_compvar('IPHONE_OS_VERSION_MIN_REQUIRED','30000');
-        iPhoneOSVersionMin:='3.0';
+        set_system_compvar('IPHONE_OS_VERSION_MIN_REQUIRED','90000');
+        iPhoneOSVersionMin:='9.0';
       end;
     system_aarch64_darwin,
     system_x86_64_iphonesim:
       begin
-        set_system_compvar('IPHONE_OS_VERSION_MIN_REQUIRED','70000');
-        iPhoneOSVersionMin:='7.0';
+        set_system_compvar('IPHONE_OS_VERSION_MIN_REQUIRED','90000');
+        iPhoneOSVersionMin:='9.0';
       end
     else
       internalerror(2012031001);
@@ -1101,7 +1094,8 @@ begin
                 begin
                   case more[j] of
                     '5' :
-                      if target_info.system in systems_all_windows+systems_nativent-[system_i8086_win16] then
+                      if (target_info.system in systems_all_windows+systems_nativent-[system_i8086_win16])
+                         or (target_info.cpu in [cpu_mipseb, cpu_mipsel]) then
                         begin
                           if UnsetBool(More, j, opt, false) then
                             exclude(init_settings.globalswitches,cs_asm_pre_binutils_2_25)
@@ -1679,9 +1673,9 @@ begin
                  'l' :
                    begin
                      if ispara then
-                       ParaLibraryPath.AddPath(sysrootpath,More,false)
+                       ParaLibraryPath.AddLibraryPath(sysrootpath,More,false)
                      else
-                       LibrarySearchPath.AddPath(sysrootpath,More,true)
+                       LibrarySearchPath.AddLibraryPath(sysrootpath,More,true)
                    end;
                  'L' :
                    begin
@@ -3224,6 +3218,12 @@ begin
     else
       undef_system_macro('FPC_REQUIRES_PROPER_ALIGNMENT');
 
+  if (tf_init_final_units_by_calls in target_info.flags) then
+    if def then
+      def_system_macro('FPC_INIT_FINAL_UNITS_BY_CALLS')
+    else
+      undef_system_macro('FPC_INIT_FINAL_UNITS_BY_CALLS');
+
   if source_info.system<>target_info.system then
     if def then
       def_system_macro('FPC_CROSSCOMPILING')
@@ -3307,7 +3307,7 @@ begin
 {$if defined(atari) or defined(hasamiga)}
    { enable vlink as default linker on Atari, Amiga, and MorphOS, but not for cross compilers (for now) }
    if (target_info.system in [system_m68k_amiga,system_m68k_atari,
-                              system_powerpc_amiga,system_powerpc_morphos]) and
+                              system_powerpc_amiga]) and
       not LinkerSetExplicitly then
      include(init_settings.globalswitches,cs_link_vlink);
 {$endif}
@@ -3728,7 +3728,7 @@ procedure read_arguments(cmd:TCmdStr);
       {$endif i8086 or avr}
       { abs(long) is handled internally on all CPUs }
         def_system_macro('FPC_HAS_INTERNAL_ABS_LONG');
-      {$if defined(i8086) or defined(i386) or defined(x86_64) or defined(powerpc64) or defined(cpuaarch64)}
+      {$if defined(i8086) or defined(i386) or defined(x86_64) or defined(powerpc64) or defined(aarch64)}
         def_system_macro('FPC_HAS_INTERNAL_ABS_INT64');
       {$endif i8086 or i386 or x86_64 or powerpc64 or aarch64}
 
@@ -4379,6 +4379,8 @@ begin
             init_settings.fputype:=fpu_none;
           end;
       end;
+    else
+      ;
   end;
 {$endif m68k}
 
@@ -4451,10 +4453,10 @@ begin
       def_system_macro('FPC_USE_WIN64_SEH');
 {$endif DISABLE_WIN64_SEH}
 
-{$ifdef TEST_WIN32_SEH}
+{$ifndef DISABLE_WIN32_SEH}
     if target_info.system=system_i386_win32 then
       def_system_macro('FPC_USE_WIN32_SEH');
-{$endif TEST_WIN32_SEH}
+{$endif not DISABLE_WIN32_SEH}
 
 {$ifdef ARM}
   { define FPC_DOUBLE_HILO_SWAPPED if needed to properly handle doubles in RTL }

@@ -578,8 +578,8 @@ unit cgobj;
 implementation
 
     uses
-       globals,systems,
-       verbose,paramgr,symsym,
+       globals,systems,fmodule,
+       verbose,paramgr,symsym,symtable,
        tgobj,cutils,procinfo;
 
 {*****************************************************************************
@@ -1143,8 +1143,7 @@ implementation
                      OS_F64,
                      OS_F128:
                        a_loadmm_ref_reg(list,location^.size,location^.size,tmpref,location^.register,mms_movescalar);
-                     OS_M8..OS_M128,
-                     OS_MS8..OS_MS128:
+                     OS_M8..OS_M512:
                        a_loadmm_ref_reg(list,location^.size,location^.size,tmpref,location^.register,nil);
                      else
                        internalerror(2010053101);
@@ -1349,8 +1348,7 @@ implementation
                 OS_F64,
                 OS_F128:
                   a_loadmm_reg_ref(list,paraloc.size,paraloc.size,paraloc.register,ref,mms_movescalar);
-                OS_M8..OS_M128,
-                OS_MS8..OS_MS128:
+                OS_M8..OS_M512:
                   a_loadmm_reg_ref(list,paraloc.size,paraloc.size,paraloc.register,ref,nil);
                 else
                   internalerror(2010053102);
@@ -1406,8 +1404,7 @@ implementation
                        OS_F64,
                        OS_F128:
                         a_loadmm_reg_reg(list,paraloc.size,regsize,paraloc.register,reg,mms_movescalar);
-                       OS_M8..OS_M128,
-                       OS_MS8..OS_MS128:
+                       OS_M8..OS_M512:
                          a_loadmm_reg_reg(list,paraloc.size,paraloc.size,paraloc.register,reg,nil);
                        else
                          internalerror(2010053102);
@@ -2817,6 +2814,8 @@ implementation
     procedure tcg.g_call(list: TAsmList;const s: string);
       begin
         allocallcpuregisters(list);
+        if systemunit<>current_module.globalsymtable then
+          current_module.add_extern_asmsym(s,AB_EXTERNAL,AT_FUNCTION);
         a_call_name(list,s,false);
         deallocallcpuregisters(list);
       end;

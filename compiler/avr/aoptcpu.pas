@@ -318,9 +318,9 @@ Implementation
               GetNextInstruction(p, hp1) and
               ((MatchInstruction(hp1, A_CP) and
                 (((taicpu(p).oper[0]^.reg = taicpu(hp1).oper[0]^.reg) and
-                  (taicpu(hp1).oper[1]^.reg = NR_R1)) or
+                  (taicpu(hp1).oper[1]^.reg = GetDefaultZeroReg)) or
                  ((taicpu(p).oper[0]^.reg = taicpu(hp1).oper[1]^.reg) and
-                  (taicpu(hp1).oper[0]^.reg = NR_R1) and
+                  (taicpu(hp1).oper[0]^.reg = GetDefaultZeroReg) and
                   (taicpu(p).opcode in [A_ADC,A_ADD,A_AND,A_ANDI,A_ASR,A_COM,A_EOR,
                                         A_LSL,A_LSR,
                                         A_OR,A_ORI,A_ROL,A_ROR,A_SUB,A_SBI])))) or
@@ -358,7 +358,7 @@ Implementation
                 // If we compare to the same value we are masking then invert the comparison
                 if (taicpu(hp1).opcode=A_CPI) or
                   { sub/sbc with reverted? }
-                  ((taicpu(hp1).oper[0]^.reg = NR_R1) and (taicpu(p).opcode in [A_SUB,A_SBI])) then
+                  ((taicpu(hp1).oper[0]^.reg = GetDefaultZeroReg) and (taicpu(p).opcode in [A_SUB,A_SBI])) then
                   taicpu(hp2).condition:=inverse_cond(taicpu(hp2).condition);
 
                 asml.InsertBefore(tai_regalloc.alloc(NR_DEFAULTFLAGS,p), p);
@@ -377,14 +377,14 @@ Implementation
                   begin
                     { turn
                       ldi reg0, imm
-                      cp/mov reg1, reg0
+                      <op> reg1, reg0
                       dealloc reg0
                       into
-                      cpi/ldi reg1, imm
+                      <op>i reg1, imm
                     }
                     if MatchOpType(taicpu(p),top_reg,top_const) and
                        GetNextInstructionUsingReg(p, hp1, taicpu(p).oper[0]^.reg) and
-                       MatchInstruction(hp1,[A_CP,A_MOV],2) and
+                       MatchInstruction(hp1,[A_CP,A_MOV,A_AND,A_SUB],2) and
                        (not RegModifiedBetween(taicpu(p).oper[0]^.reg, p, hp1)) and
                        MatchOpType(taicpu(hp1),top_reg,top_reg) and
                        (getsupreg(taicpu(hp1).oper[0]^.reg) in [16..31]) and
@@ -392,6 +392,8 @@ Implementation
                        not(MatchOperand(taicpu(hp1).oper[0]^,taicpu(hp1).oper[1]^)) then
                       begin
                         TransferUsedRegs(TmpUsedRegs);
+                        UpdateUsedRegs(TmpUsedRegs,tai(p.next));
+                        UpdateUsedRegs(TmpUsedRegs,tai(hp1.next));
                         if not(RegUsedAfterInstruction(taicpu(hp1).oper[1]^.reg, hp1, TmpUsedRegs)) then
                           begin
                             case taicpu(hp1).opcode of
@@ -399,6 +401,10 @@ Implementation
                                 taicpu(hp1).opcode:=A_CPI;
                               A_MOV:
                                 taicpu(hp1).opcode:=A_LDI;
+                              A_AND:
+                                taicpu(hp1).opcode:=A_ANDI;
+                              A_SUB:
+                                taicpu(hp1).opcode:=A_SUBI;
                               else
                                 internalerror(2016111901);
                             end;
@@ -415,7 +421,7 @@ Implementation
                                 dealloc.Free;
                               end;
 
-                            DebugMsg('Peephole LdiMov/Cp2Ldi/Cpi performed', p);
+                            DebugMsg('Peephole LdiOp2Opi performed', p);
 
                             RemoveCurrentP(p);
                           end;
@@ -427,13 +433,21 @@ Implementation
                     (getsupreg(taicpu(p).oper[0]^.ref^.base)=RS_NO) and
                     (getsupreg(taicpu(p).oper[0]^.ref^.index)=RS_NO) and
                     (taicpu(p).oper[0]^.ref^.addressmode=AM_UNCHANGED) and
-                    (taicpu(p).oper[0]^.ref^.offset>=32) and
-                    (taicpu(p).oper[0]^.ref^.offset<=95) then
+                    // avrxmega3 doesn't map registers into data space so no offset to subtract
+                    (((current_settings.cputype = cpu_avrxmega3) and
+                      (taicpu(p).oper[0]^.ref^.offset>=0) and
+                      (taicpu(p).oper[0]^.ref^.offset<=63)) or
+                     ((current_settings.cputype <> cpu_avrxmega3) and
+                      (taicpu(p).oper[0]^.ref^.offset>=32) and
+                      (taicpu(p).oper[0]^.ref^.offset<=95))) then
                     begin
                       DebugMsg('Peephole Sts2Out performed', p);
 
                       taicpu(p).opcode:=A_OUT;
-                      taicpu(p).loadconst(0,taicpu(p).oper[0]^.ref^.offset-32);
+                      if current_settings.cputype = cpu_avrxmega3 then
+                        taicpu(p).loadconst(0,taicpu(p).oper[0]^.ref^.offset)
+                      else
+                        taicpu(p).loadconst(0,taicpu(p).oper[0]^.ref^.offset-32);
                     end;
                 A_LDS:
                   if (taicpu(p).oper[1]^.ref^.symbol=nil) and
@@ -441,13 +455,21 @@ Implementation
                     (getsupreg(taicpu(p).oper[1]^.ref^.base)=RS_NO) and
                     (getsupreg(taicpu(p).oper[1]^.ref^.index)=RS_NO) and
                     (taicpu(p).oper[1]^.ref^.addressmode=AM_UNCHANGED) and
-                    (taicpu(p).oper[1]^.ref^.offset>=32) and
-                    (taicpu(p).oper[1]^.ref^.offset<=95) then
+                    // avrxmega3 doesn't map registers into data space so no offset to subtract
+                    (((current_settings.cputype = cpu_avrxmega3) and
+                      (taicpu(p).oper[1]^.ref^.offset>=0) and
+                      (taicpu(p).oper[1]^.ref^.offset<=63)) or
+                     ((current_settings.cputype <> cpu_avrxmega3) and
+                      (taicpu(p).oper[1]^.ref^.offset>=32) and
+                      (taicpu(p).oper[1]^.ref^.offset<=95))) then
                     begin
                       DebugMsg('Peephole Lds2In performed', p);
 
                       taicpu(p).opcode:=A_IN;
-                      taicpu(p).loadconst(1,taicpu(p).oper[1]^.ref^.offset-32);
+                      if current_settings.cputype = cpu_avrxmega3 then
+                        taicpu(p).loadconst(1,taicpu(p).oper[1]^.ref^.offset)
+                      else
+                        taicpu(p).loadconst(1,taicpu(p).oper[1]^.ref^.offset-32);
                     end;
                 A_IN:
                     if GetNextInstruction(p,hp1) then
@@ -653,7 +675,7 @@ Implementation
                   end;
                 A_ADD:
                   begin
-                    if (taicpu(p).oper[1]^.reg=NR_R1) and
+                    if (taicpu(p).oper[1]^.reg=GetDefaultZeroReg) and
                     GetNextInstruction(p, hp1) and
                     MatchInstruction(hp1,A_ADC) then
                     begin
@@ -664,7 +686,7 @@ Implementation
                   end;
                 A_SUB:
                   begin
-                    if (taicpu(p).oper[1]^.reg=NR_R1) and
+                    if (taicpu(p).oper[1]^.reg=GetDefaultZeroReg) and
                     GetNextInstruction(p, hp1) and
                     MatchInstruction(hp1,A_SBC) then
                     begin
@@ -719,7 +741,7 @@ Implementation
                       begin
                         DebugMsg('Peephole ClrAdc2Adc performed', p);
 
-                        taicpu(hp1).oper[1]^.reg:=NR_R1;
+                        taicpu(hp1).oper[1]^.reg:=GetDefaultZeroReg;
 
                         alloc:=FindRegAllocBackward(taicpu(p).oper[0]^.reg,tai(p.Previous));
                         dealloc:=FindRegDeAlloc(taicpu(p).oper[0]^.reg,tai(hp1.Next));

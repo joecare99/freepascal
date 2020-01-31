@@ -417,10 +417,10 @@ implementation
         if (l.loc<>LOC_MMREGISTER)  and
            ((l.loc<>LOC_CMMREGISTER) or (not maybeconst)) then
           begin
-            reg:=cg.getmmregister(list,OS_VECTOR);
-            cg.a_loadmm_loc_reg(list,OS_VECTOR,l,reg,nil);
+            reg:=cg.getmmregister(list,l.size);
+            cg.a_loadmm_loc_reg(list,l.size,l,reg,nil);
             location_freetemp(list,l);
-            location_reset(l,LOC_MMREGISTER,OS_VECTOR);
+            location_reset(l,LOC_MMREGISTER,l.size);
             l.register:=reg;
           end;
       end;
@@ -767,9 +767,8 @@ implementation
             parasize:=0;
             { For safecall functions with safecall-exceptions enabled the funcret is always returned as a para
               which is considered a normal para on the c-side, so the funcret has to be pop'ed normally. }
-            if not ( (current_procinfo.procdef.proccalloption=pocall_safecall) and
-                     (tf_safecall_exceptions in target_info.flags) ) and
-                   paramanager.ret_in_param(current_procinfo.procdef.returndef,current_procinfo.procdef) then
+            if not current_procinfo.procdef.generate_safecall_wrapper and
+               paramanager.ret_in_param(current_procinfo.procdef.returndef,current_procinfo.procdef) then
               inc(parasize,sizeof(pint));
           end
         else
@@ -777,7 +776,7 @@ implementation
             parasize:=current_procinfo.para_stack_size;
             { the parent frame pointer para has to be removed always by the caller in
               case of Delphi-style parent frame pointer passing }
-            if (not(paramanager.use_fixed_stack) or (target_info.abi=abi_linux386_sysv)) and
+            if (not(paramanager.use_fixed_stack) or (target_info.abi=abi_i386_dynalignedstack)) and
                (po_delphi_nested_cc in current_procinfo.procdef.procoptions) then
               dec(parasize,sizeof(pint));
           end;
@@ -910,7 +909,11 @@ implementation
               localvarsym :
                 begin
                   vs:=tabstractnormalvarsym(sym);
-                  vs.initialloc.size:=def_cgsize(vs.vardef);
+                  if is_vector(vs.vardef) and
+                     fits_in_mm_register(vs.vardef) then
+                    vs.initialloc.size:=def_cgmmsize(vs.vardef)
+                  else
+                    vs.initialloc.size:=def_cgsize(vs.vardef);
                   if ([po_assembler,po_nostackframe] * pd.procoptions = [po_assembler,po_nostackframe]) and
                      (vo_is_funcret in vs.varoptions) then
                     begin

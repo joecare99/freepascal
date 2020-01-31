@@ -27,6 +27,7 @@ interface
 
     uses
        node,htypechk,symtype,compinnr;
+
     type
        tinlinenode = class(tunarynode)
           inlinenumber : tinlinenumber;
@@ -85,6 +86,7 @@ interface
             by the JVM backend to create new dynamic arrays. }
           function first_new: tnode; virtual;
           function first_length: tnode; virtual;
+          function first_high: tnode; virtual;
           function first_box: tnode; virtual; abstract;
           function first_unbox: tnode; virtual; abstract;
           function first_assigned: tnode; virtual;
@@ -2283,14 +2285,14 @@ implementation
                case inlinenumber of
                  in_const_abs :
                    if vl.signed then
-                     hp:=create_simplified_ord_const(abs(vl.svalue),resultdef,forinline)
+                     hp:=create_simplified_ord_const(abs(vl.svalue),resultdef,forinline,false)
                    else
-                     hp:=create_simplified_ord_const(vl.uvalue,resultdef,forinline);
+                     hp:=create_simplified_ord_const(vl.uvalue,resultdef,forinline,false);
                  in_const_sqr:
                    if vl.signed then
-                     hp:=create_simplified_ord_const(sqr(vl.svalue),resultdef,forinline)
+                     hp:=create_simplified_ord_const(sqr(vl.svalue),resultdef,forinline,false)
                    else
-                     hp:=create_simplified_ord_const(sqr(vl.uvalue),resultdef,forinline);
+                     hp:=create_simplified_ord_const(sqr(vl.uvalue),resultdef,forinline,false);
                  in_const_odd :
                    hp:=cordconstnode.create(qword(odd(int64(vl))),pasbool1type,true);
                  in_const_swap_word :
@@ -2520,7 +2522,7 @@ implementation
                           { the type of the original integer constant is irrelevant,
                             it should be automatically adapted to the new value
                             (except when inlining) }
-                          result:=create_simplified_ord_const(vl,resultdef,forinline)
+                          result:=create_simplified_ord_const(vl,resultdef,forinline,cs_check_range in localswitches)
                         else
                           { check the range for enums, chars, booleans }
                           result:=cordconstnode.create(vl,left.resultdef,not(nf_internal in flags));
@@ -2870,9 +2872,9 @@ implementation
                  (index.left.nodetype = ordconstn) and
                  not is_special_array(unpackedarraydef) then
                 begin
-                  adaptrange(unpackedarraydef,tordconstnode(index.left).value,rc_default);
+                  adaptrange(unpackedarraydef,tordconstnode(index.left).value,false,false,cs_check_range in current_settings.localswitches);
                   tempindex := tordconstnode(index.left).value + packedarraydef.highrange-packedarraydef.lowrange;
-                  adaptrange(unpackedarraydef,tempindex,rc_default);
+                  adaptrange(unpackedarraydef,tempindex,false,false,cs_check_range in current_settings.localswitches);
                 end;
             end;
 
@@ -2900,7 +2902,6 @@ implementation
             Message1(type_e_objc_type_unsupported,errordef.typename);
           result:=cstringconstnode.createpchar(ansistring2pchar(encodedtype),length(encodedtype),nil);
         end;
-
 
       var
          hightree,
@@ -3151,6 +3152,14 @@ implementation
                     CGMessage(type_e_no_type_info);
                   set_varstate(left,vs_read,[vsf_must_be_valid]);
                   resultdef:=typekindtype;
+                end;
+
+              in_ismanagedtype_x:
+                begin
+                  if target_info.system in systems_managed_vm then
+                    message(parser_e_feature_unsupported_for_vm);
+                  set_varstate(left,vs_read,[vsf_must_be_valid]);
+                  resultdef:=pasbool1type;
                 end;
 
               in_assigned_x:
@@ -3476,21 +3485,10 @@ implementation
                               result:=load_high_value_node(tparavarsym(tloadnode(left).symtableentry));
                             end
                            else
-                            if is_dynamic_array(left.resultdef) then
-                              begin
-                                set_varstate(left,vs_read,[vsf_must_be_valid]);
-                                { can't use inserttypeconv because we need }
-                                { an explicit type conversion (JM)         }
-                                hp := ccallparanode.create(ctypeconvnode.create_internal(left,voidpointertype),nil);
-                                result := ccallnode.createintern('fpc_dynarray_high',hp);
-                                { make sure the left node doesn't get disposed, since it's }
-                                { reused in the new node (JM)                              }
-                                left:=nil;
-                              end
-                           else
-                            begin
-                              set_varstate(left,vs_read,[]);
-                            end;
+                             begin
+                               set_varstate(left,vs_read,[]);
+                               resultdef:=sizesinttype;
+                             end;
                          end;
                       end;
                     stringdef:
@@ -3836,6 +3834,14 @@ implementation
               result:=genenumnode(tenumsym(sym));
             end;
 
+          in_ismanagedtype_x:
+            begin
+              if left.resultdef.needs_inittable then
+                result:=cordconstnode.create(1,resultdef,false)
+              else
+                result:=cordconstnode.create(0,resultdef,false);
+            end;
+
           in_assigned_x:
             begin
               result:=first_assigned;
@@ -4031,9 +4037,12 @@ implementation
               result:=first_assert;
             end;
 
-          in_low_x,
-          in_high_x:
+          in_low_x:
             internalerror(200104047);
+          in_high_x:
+            begin
+              result:=first_high;
+            end;
 
           in_slice_x:
             internalerror(2005101501);
@@ -4462,6 +4471,7 @@ implementation
      function tinlinenode.first_get_frame: tnode;
        begin
          include(current_procinfo.flags,pi_needs_stackframe);
+         include(current_procinfo.flags,pi_uses_get_frame);
          expectloc:=LOC_CREGISTER;
          result:=nil;
        end;
@@ -4686,6 +4696,15 @@ implementation
             { ansi/wide string }
             expectloc:=LOC_REGISTER;
           end;
+       end;
+
+
+     function tinlinenode.first_high: tnode;
+       begin
+         result:=nil;
+         if not(is_dynamic_array(left.resultdef)) then
+           Internalerror(2019122802);
+         expectloc:=LOC_REGISTER;
        end;
 
 
@@ -5290,7 +5309,20 @@ implementation
          result:=nil;
        end;
 
-
+//
+//||||||| .merge-left.r31134
+//
+//{$ifdef ARM}
+//              {$i armtype.inc}
+//{$endif ARM}
+//=======
+//
+//{$ifdef x86}
+//              {$i x86type.inc}
+//{$endif x86}
+//{$ifdef ARM}
+//              {$i armtype.inc}
+//{$endif ARM}
 {$if not defined(cpu64bitalu) and not defined(cpuhighleveltarget)}
      function tinlinenode.first_ShiftRot_assign_64bitint: tnode;
        var

@@ -376,7 +376,7 @@ CPU_UNITS=lpc8xx lpc11xx lpc122x stm32f0xx nrf51 cortexm0
 CPU_UNITS_DEFINED=1
 endif
 ifeq ($(SUBARCH),armv7a)
-CPU_UNITS=allwinner_a20
+CPU_UNITS=allwinner_a20 raspi2
 CPU_UNITS_DEFINED=1
 endif
 ifeq ($(CPU_UNITS_DEFINED),)
@@ -385,11 +385,19 @@ endif
 endif
 ifeq ($(ARCH),avr)
 CPU_SPECIFIC_COMMON_UNITS=intrinsics
+ifeq ($(SUBARCH),avrtiny)
+CPU_UNITS=attiny4 attiny5 attiny9 attiny10 attiny20 attiny40
+CPU_UNITS_DEFINED=1
+endif
+ifeq ($(SUBARCH),avr2)
+CPU_UNITS=attiny26
+CPU_UNITS_DEFINED=1
+endif
 ifeq ($(SUBARCH),avr25)
-CPU_UNITS=attiny44a attiny26 attiny48 attiny10 attiny84a attiny2313 attiny461 attiny43u \
-	  attiny24a attiny88 attiny40 attiny861 attiny85 attiny20 attiny24 attiny9 \
-	  attiny87 attiny84 attiny13a attiny45 attiny5 attiny828 attiny4313 attiny13 attiny261 \
-	  attiny861a attiny28 attiny4 attiny44 attiny2313a attiny461a attiny261a attiny25
+CPU_UNITS=attiny44a attiny48 attiny84a attiny2313 attiny461 attiny43u \
+	  attiny24a attiny88 attiny861 attiny85 attiny24 \
+	  attiny87 attiny84 attiny13a attiny45 attiny828 attiny4313 attiny13 attiny261 \
+	  attiny861a attiny28 attiny44 attiny2313a attiny461a attiny261a attiny25
 CPU_UNITS_DEFINED=1
 endif
 ifeq ($(SUBARCH),avr35)
@@ -424,6 +432,13 @@ ifeq ($(SUBARCH),avr6)
 CPU_UNITS=atmega2561 atmega2560 avrsim
 CPU_UNITS_DEFINED=1
 endif
+ifeq ($(SUBARCH),avrxmega3)
+CPU_UNITS=atmega808 atmega809 atmega1608 atmega1609 atmega3208 atmega3209 atmega4808 atmega4809 \
+          attiny202 attiny204 attiny212 attiny214 attiny402 attiny404 attiny406 attiny412 attiny414 \
+          attiny416 attiny416auto attiny417 attiny804 attiny806 attiny807 attiny814 attiny816 attiny817 \
+          attiny1604 attiny1606 attiny1607 attiny1614 attiny1616 attiny1617 attiny3214 attiny3216 attiny3217
+CPU_UNITS_DEFINED=1
+endif
 ifeq ($(CPU_UNITS_DEFINED),)
 $(error No CPUs enabled for given SUBARCH, pass either a SUBARCH or set CPU_UNITS_DEFINED=1 if you know what you are doing)
 endif
@@ -454,8 +469,11 @@ endif
 endif
 ifeq ($(ARCH),riscv32)
 CPU_SPECIFIC_COMMON_UNITS=sysutils math classes fgl macpas typinfo types rtlconsts getopts lineinfo
-CPU_UNITS=
+ifeq ($(SUBARCH),rv32imac)
+override FPCOPT+=-Cprv32imac
+CPU_UNITS=fe310g000 fe310g002 gd32vf103xx
 CPU_UNITS_DEFINED=1
+endif
 ifeq ($(CPU_UNITS_DEFINED),)
 $(error No CPUs enabled for given SUBARCH, pass either a SUBARCH or set CPU_UNITS_DEFINED=1 if you know what you are doing)
 endif
@@ -2508,7 +2526,7 @@ fpc_shared:
 ifdef HASSHAREDLIB
 	$(MAKE) all CREATESHARED=1 LINKSHARED=1 CREATESMART=1
 ifneq ($(SHARED_BUILD),n)
-	$(PPUMOVE) -q $(SHARED_LIBUNITS) -i$(COMPILER_UNITTARGETDIR) -o$(SHARED_FULLNAME) -d$(COMPILER_UNITTARGETDIR)
+	$(PPUMOVE) -q $(SHARED_LIBUNITS) -i$(COMPILER_UNITTARGETDIR) -o$(SHARED_FULLNAME) -d$(COMPILER_UNITTARGETDIR) -P$(BINUTILSPREFIX)
 endif
 else
 	@$(ECHO) Shared Libraries not supported
@@ -2535,8 +2553,10 @@ else
 override INSTALLPPULINKFILES:=$(subst $(PPUEXT),$(OEXT),$(INSTALLPPUFILES)) $(subst $(PPUEXT),$(LTOEXT),$(INSTALLPPUFILES)) $(addprefix $(STATICLIBPREFIX),$(subst $(PPUEXT),$(STATICLIBEXT),$(INSTALLPPUFILES)))
 endif
 ifneq ($(UNITTARGETDIRPREFIX),)
-override INSTALLPPUFILES:=$(addprefix $(UNITTARGETDIRPREFIX),$(notdir $(INSTALLPPUFILES)))
-override INSTALLPPULINKFILES:=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(notdir $(INSTALLPPULINKFILES))))
+override INSTALLPPUFILENAMES:=$(notdir $(INSTALLPPUFILES))
+override INSTALLPPULINKFILENAMES:=$(notdir $(INSTALLPPULINKFILES))
+override INSTALLPPUFILES=$(addprefix $(UNITTARGETDIRPREFIX),$(INSTALLPPUFILENAMES))
+override INSTALLPPULINKFILES=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(INSTALLPPULINKFILENAMES)))
 endif
 override INSTALL_CREATEPACKAGEFPC=1
 endif
@@ -2609,8 +2629,10 @@ override CLEANPPULINKFILES:=$(subst $(PPUEXT),$(OEXT),$(CLEANPPUFILES)) $(subst 
 ifdef DEBUGSYMEXT
 override CLEANPPULINKFILES+=$(subst $(PPUEXT),$(DEBUGSYMEXT),$(CLEANPPUFILES))
 endif
-override CLEANPPUFILES:=$(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPUFILES))
-override CLEANPPULINKFILES:=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPULINKFILES)))
+override CLEANPPUFILENAMES:=$(CLEANPPUFILES)
+override CLEANPPUFILES=$(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPUFILENAMES))
+override CLEANPPULINKFILENAMES:=$(CLEANPPULINKFILES)
+override CLEANPPULINKFILES=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPULINKFILENAMES)))
 endif
 fpc_clean: $(CLEANTARGET)
 ifdef CLEANEXEFILES

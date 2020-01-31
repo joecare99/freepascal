@@ -1734,8 +1734,10 @@ override CLEANPPULINKFILES:=$(subst $(PPUEXT),$(OEXT),$(CLEANPPUFILES)) $(subst 
 ifdef DEBUGSYMEXT
 override CLEANPPULINKFILES+=$(subst $(PPUEXT),$(DEBUGSYMEXT),$(CLEANPPUFILES))
 endif
-override CLEANPPUFILES:=$(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPUFILES))
-override CLEANPPULINKFILES:=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPULINKFILES)))
+override CLEANPPUFILENAMES:=$(CLEANPPUFILES)
+override CLEANPPUFILES=$(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPUFILENAMES))
+override CLEANPPULINKFILENAMES:=$(CLEANPPULINKFILES)
+override CLEANPPULINKFILES=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPULINKFILENAMES)))
 endif
 fpc_clean: $(CLEANTARGET)
 ifdef CLEANEXEFILES
@@ -1945,20 +1947,26 @@ ifeq ($(OS_TARGET),msdos)
 override TESTOPT+=-CX
 endif
 TESTCOMPILER:=$(FPC) $(TESTOPT)
+FPCFPMAKE=$(NATIVE_FPC)
 ifdef CROSSCOMPILE
 override CROSSOPT:=$(OPT)
 override OPT=
 override BUILDFULLNATIVE=
+DEV_FPC=$(wildcard $(CURDIR)/../../compiler/ppc$(SRCEXEEXT))
+ifneq ($(DEV_FPC), )
+  FPCFPMAKE=$(DEV_FPC)
 endif
+endif
+export FPCFPMAKE
 DUMMYINSTALLDIR=$(BASEDIR)/tmp
 INSTALLOPT=INSTALL_PREFIX=$(DUMMYINSTALLDIR) INSTALL_UNITDIR=$(BASEDIR)/$(COMPILER_TARGETDIR)
 rtl-stamp.$(FULL_TARGET):
 ifneq ($(inOS2),)
-	$(MAKE) -C ../../rtl all "OPT=$(OPT) -n" "CROSSOPT=$(CROSSOPT)" FPC=$(FPC) FPCFPMAKE=$(NATIVE_FPC)
+	$(MAKE) -C ../../rtl all "OPT=$(OPT) -n" "CROSSOPT=$(CROSSOPT)" FPC=$(FPC)
 else
-	$(MAKE) -C ../../rtl all 'OPT=$(OPT) -n' 'CROSSOPT=$(CROSSOPT)' FPC=$(FPC) FPCFPMAKE=$(NATIVE_FPC)
+	$(MAKE) -C ../../rtl all 'OPT=$(OPT) -n' 'CROSSOPT=$(CROSSOPT)' FPC=$(FPC)
 endif
-	$(MAKE) -C ../../rtl install $(INSTALLOPT) OPT= CROSSOPT= FPC=$(FPC) FPCFPMAKE=$(NATIVE_FPC)
+	$(MAKE) -C ../../rtl install $(INSTALLOPT) OPT= CROSSOPT= FPC=$(FPC)
 	$(ECHO) Compiled > rtl-stamp.$(FULL_TARGET)
 cleanrtl:
 	$(DELTREE) $(COMPILER_TARGETDIR)
@@ -1991,11 +1999,11 @@ INSTALLOPT=INSTALL_PREFIX=$(DUMMYINSTALLDIR) INSTALL_UNITDIR=$(BASEDIR)/$(COMPIL
 PACKAGESDIR=$(FPCDIR)/packages
 packages-stamp.$(FULL_TARGET):
 ifneq ($(inOS2),)
-	$(MAKE) -C ../../packages all "OPT=$(OPT) -n" "CROSSOPT=$(CROSSOPT)" FPC=$(FPC) FPCFPMAKE=$(NATIVE_FPC)
+	$(MAKE) -C ../../packages all "OPT=$(OPT) -n" "CROSSOPT=$(CROSSOPT)" FPC=$(FPC)
 else
-	$(MAKE) -C ../../packages all 'OPT=$(OPT) -n' 'CROSSOPT=$(CROSSOPT)' FPC=$(FPC) FPCFPMAKE=$(NATIVE_FPC)
+	$(MAKE) -C ../../packages all 'OPT=$(OPT) -n' 'CROSSOPT=$(CROSSOPT)' FPC=$(FPC)
 endif
-	$(MAKE) -C ../../packages install $(INSTALLOPT) OPT= CROSSOPT= FPC=$(FPC) FPCFPMAKE=$(NATIVE_FPC)
+	$(MAKE) -C ../../packages install $(INSTALLOPT) OPT= CROSSOPT= FPC=$(FPC)
 	$(ECHO) Compiled > packages-stamp.$(FULL_TARGET)
 cleanpackages:
 	$(DELTREE) $(COMPILER_TARGETDIR)

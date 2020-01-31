@@ -180,7 +180,6 @@ CPUSUF=386
 endif
 ifeq ($(CPC_TARGET),m68k)
 CPUSUF=68k
-ALLOW_WARNINGS=1
 endif
 ifeq ($(CPC_TARGET),powerpc)
 CPUSUF=ppc
@@ -283,12 +282,12 @@ endif
 
 # i386 specific
 ifeq ($(PPC_TARGET),i386)
-override LOCALOPT+=-Fux86
+override LOCALOPT+=-Fux86 -Fix86
 endif
 
 # x86_64 specific
 ifeq ($(PPC_TARGET),x86_64)
-override LOCALOPT+=-Fux86
+override LOCALOPT+=-Fux86 -Fix86
 endif
 
 # PowerPC specific

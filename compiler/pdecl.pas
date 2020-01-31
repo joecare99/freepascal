@@ -239,6 +239,7 @@ implementation
                        sym.deprecatedmsg:=deprecatedmsg;
                        sym.visibility:=symtablestack.top.currentvisibility;
                        symtablestack.top.insert(sym);
+                       sym.register_sym;
 {$ifdef jvm}
                        { for the JVM target, some constants need to be
                          initialized at run time (enums, sets) -> create fake
@@ -295,6 +296,7 @@ implementation
                        sym.visibility:=symtablestack.top.currentvisibility;
                        symtablestack.top.insert(sym);
                      end;
+                   sym.register_sym;
                    current_tokenpos:=storetokenpos;
                    { procvar can have proc directives, but not type references }
                    if (hdef.typ=procvardef) and
@@ -658,8 +660,7 @@ implementation
          isunique,
          istyperenaming : boolean;
          generictypelist : tfphashobjectlist;
-         generictokenbuf : tdynamicarray;
-         vmtbuilder : TVMTBuilder;
+         localgenerictokenbuf : tdynamicarray;
          p:tnode;
          gendef : tstoreddef;
          s : shortstring;
@@ -681,7 +682,7 @@ implementation
            defpos:=current_tokenpos;
            istyperenaming:=false;
            generictypelist:=nil;
-           generictokenbuf:=nil;
+           localgenerictokenbuf:=nil;
 
            { class attribute definitions? }
            if m_prefixed_attributes in current_settings.modeswitches then
@@ -743,8 +744,8 @@ implementation
            { Start recording a generic template }
            if assigned(generictypelist) then
              begin
-               generictokenbuf:=tdynamicarray.create(256);
-               current_scanner.startrecordtokens(generictokenbuf);
+               localgenerictokenbuf:=tdynamicarray.create(256);
+               current_scanner.startrecordtokens(localgenerictokenbuf);
              end;
 
            { is the type already defined? -- must be in the current symtable,
@@ -1052,21 +1053,19 @@ implementation
                              cgmessage(type_e_function_reference_kind)
                            else
                              begin
-                               if (po_hascallingconvention in tprocvardef(hdef).procoptions) and
-                                  (tprocvardef(hdef).proccalloption in [pocall_cdecl,pocall_mwpascal]) then
-                                 begin
-                                   include(tprocvardef(hdef).procoptions,po_is_block);
-                                   { can't check yet whether the parameter types
-                                     are valid for a block, since some of them
-                                     may still be forwarddefs }
-                                 end
-                               else
-                                 { a regular anonymous function type: not yet supported }
-                                 { the }
-                                 Comment(V_Error,'Function references are not yet supported, only C blocks (add "cdecl;" at the end)');
-                             end
+                               { this message is only temporary; once Delphi style anonymous functions
+                                 are supported, this check is no longer required }
+                               if not (po_is_block in tprocvardef(hdef).procoptions) then
+                                 comment(v_error,'Function references are not yet supported, only C blocks (add "cblock;" at the end)');
+                             end;
                          end;
                        handle_calling_convention(tprocvardef(hdef),hcc_default_actions_intf);
+                       if po_is_function_ref in tprocvardef(hdef).procoptions then
+                         begin
+                           if (po_is_block in tprocvardef(hdef).procoptions) and
+                              not (tprocvardef(hdef).proccalloption in [pocall_cdecl,pocall_mwpascal]) then
+                             message(type_e_cblock_callconv);
+                         end;
                        if try_consume_hintdirective(newtype.symoptions,newtype.deprecatedmsg) then
                          consume(_SEMICOLON);
                      end;
@@ -1086,11 +1085,7 @@ implementation
                     { Build VMT indexes, skip for type renaming and forward classes }
                     if (hdef.typesym=newtype) and
                        not(oo_is_forward in tobjectdef(hdef).objectoptions) then
-                      begin
-                        vmtbuilder:=TVMTBuilder.Create(tobjectdef(hdef));
-                        vmtbuilder.generate_vmt;
-                        vmtbuilder.free;
-                      end;
+                      build_vmt(tobjectdef(hdef));
 
                     { In case of an objcclass, verify that all methods have a message
                       name set. We only check this now, because message names can be set
@@ -1137,7 +1132,7 @@ implementation
            if assigned(generictypelist) then
              begin
                current_scanner.stoprecordtokens;
-               tstoreddef(hdef).generictokenbuf:=generictokenbuf;
+               tstoreddef(hdef).generictokenbuf:=localgenerictokenbuf;
                { Generic is never a type renaming }
                hdef.typesym:=newtype;
                generictypelist.free;

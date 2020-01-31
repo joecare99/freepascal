@@ -174,7 +174,7 @@ type
   
   TDBLogNotifyEvent = Procedure (Sender : TSQLConnection; EventType : TDBEventType; Const Msg : String) of object;
 
-  TConnOption = (sqSupportParams, sqSupportEmptyDatabaseName, sqEscapeSlash, sqEscapeRepeat, sqImplicitTransaction, sqLastInsertID, sqSupportReturning);
+  TConnOption = (sqSupportParams, sqSupportEmptyDatabaseName, sqEscapeSlash, sqEscapeRepeat, sqImplicitTransaction, sqLastInsertID, sqSupportReturning,sqSequences);
   TConnOptions= set of TConnOption;
 
   TSQLConnectionOption = (scoExplicitConnect, scoApplyUpdatesChecksRowsAffected);
@@ -268,6 +268,7 @@ type
 
     Property Statements : TThreadList Read FStatements;
     property Port: cardinal read GetPort write SetPort;
+    property CodePage: TSystemCodePage read FCodePage;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;

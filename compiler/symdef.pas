@@ -493,7 +493,6 @@ interface
           procedure buildderef;override;
           procedure deref;override;
           procedure derefimpl;override;
-          procedure resetvmtentries;
           procedure copyvmtentries(objdef:tobjectdef);
           function  getparentdef:tdef;override;
           function  size : asizeint;override;
@@ -559,19 +558,23 @@ interface
           _elementdef      : tdef;
           _elementdefderef : tderef;
           procedure setelementdef(def:tdef);
+          class function getreusable_intern(def: tdef; elems: asizeint; const options: tarraydefoptions): tarraydef;
        public
           function elesize : asizeint;
           function elepackedbitsize : asizeint;
           function elecount : asizeuint;
-          constructor create_from_pointer(def:tpointerdef);virtual;
-          constructor create(l,h:asizeint;def:tdef);virtual;
+          constructor create_from_pointer(def: tpointerdef);virtual;
+          constructor create(l, h: asizeint; def: tdef);virtual;
+          constructor create_vector(l,h:asizeint; def:tdef);
           constructor create_openarray;virtual;
-          class function getreusable(def: tdef; elems: asizeint): tarraydef; virtual;
+          class function getreusable(def: tdef; elems: asizeint): tarraydef;
+          class function getreusable_vector(def: tdef; elems: asizeint): tarraydef;
           { same as above, but in case the def must never be freed after the
             current module has been compiled -- even if the def was not written
             to the ppu file (for defs in para locations, as we don't reset them
             so we don't have to recalculate them all the time) }
           class function getreusable_no_free(def: tdef; elems: asizeint): tarraydef;
+          class function getreusable_no_free_vector(def: tdef; elems: asizeint): tarraydef;
           constructor ppuload(ppufile:tcompilerppufile);
           destructor destroy; override;
           function getcopy : tstoreddef;override;
@@ -589,6 +592,7 @@ interface
           function needs_separate_initrtti : boolean;override;
           property elementdef : tdef read _elementdef write setelementdef;
           function is_publishable : boolean;override;
+          function is_hwvector: boolean;
        end;
        tarraydefclass = class of tarraydef;
 
@@ -688,6 +692,7 @@ interface
           function ofs_address_type:tdef;virtual;
           procedure declared_far;virtual;
           procedure declared_near;virtual;
+          function generate_safecall_wrapper: boolean; virtual;
        private
           procedure count_para(p:TObject;arg:pointer);
           procedure insert_para(p:TObject;arg:pointer);
@@ -878,7 +883,8 @@ interface
           procedure make_external;
           procedure init_genericdecl;
 
-          function getfuncretsyminfo(out ressym: tsym; out resdef: tdef): boolean; virtual;
+          function get_funcretsym_info(out ressym: tsym; out resdef: tdef): boolean; virtual;
+          function get_safecall_funcretsym_info(out ressym: tsym; out resdef: tdef): boolean; virtual;
 
           { returns whether the mangled name or any of its aliases is equal to
             s }
@@ -1227,6 +1233,15 @@ interface
        { FPC java procvar base class }
        java_procvarbase          : tobjectdef;
 
+       { x86 vector types }
+       x86_m64type,
+       x86_m128type,
+       x86_m128dtype,
+       x86_m128itype,
+       x86_m256type,
+       x86_m256dtype,
+       x86_m256itype             : tdef;
+
 
     function make_mangledname(const typeprefix:TSymStr;st:TSymtable;const suffix:TSymStr):TSymStr;
     function make_dllmangledname(const dllname,importname:TSymStr;
@@ -1301,7 +1316,7 @@ implementation
       { parser }
       pgenutil,
       { module }
-      fmodule,
+      fmodule,ppu,
       { other }
       aasmbase,
       gendef,
@@ -1790,7 +1805,7 @@ implementation
         cnt,i : longint;
         intfderef : pderef;
       begin
-        ppufile.getsmallset(flags);
+        ppufile.getset(tppuset1(flags));
         cnt:=ppufile.getlongint;
         for i:=0 to cnt-1 do
           begin
@@ -1805,7 +1820,7 @@ implementation
       var
         i : longint;
       begin
-        ppufile.putsmallset(flags);
+        ppufile.putset(tppuset1(flags));
         ppufile.putlongint(interfacesderef.count);
         for i:=0 to interfacesderef.count-1 do
           ppufile.putderef(pderef(interfacesderef[i])^);
@@ -1941,8 +1956,8 @@ implementation
 {$endif}
          { load }
          ppufile.getderef(typesymderef);
-         ppufile.getsmallset(defoptions);
-         ppufile.getsmallset(defstates);
+         ppufile.getset(tppuset2(defoptions));
+         ppufile.getset(tppuset1(defstates));
          if df_genconstraint in defoptions then
            begin
              genconstraintdata:=tgenericconstraintdata.create;
@@ -2109,10 +2124,10 @@ implementation
           internalerror(2015101401);
         ppufile.putlongint(DefId);
         ppufile.putderef(typesymderef);
-        ppufile.putsmallset(defoptions);
+        ppufile.putset(tppuset2(defoptions));
         oldintfcrc:=ppufile.do_crc;
         ppufile.do_crc:=false;
-        ppufile.putsmallset(defstates);
+        ppufile.putset(tppuset1(defstates));
         if df_genconstraint in defoptions then
           genconstraintdata.ppuwrite(ppufile);
         if [df_generic,df_specialization]*defoptions<>[] then
@@ -4034,7 +4049,7 @@ implementation
                            TARRAYDEF
 ***************************************************************************}
 
-    constructor tarraydef.create(l,h:asizeint;def:tdef);
+    constructor tarraydef.create(l, h: asizeint; def: tdef);
       begin
          inherited create(arraydef,true);
          lowrange:=l;
@@ -4047,6 +4062,12 @@ implementation
          symtable:=tarraysymtable.create(self);
       end;
 
+    constructor tarraydef.create_vector(l ,h: asizeint; def: tdef);
+      begin
+        self.create(l,h,def);
+        include(arrayoptions,ado_IsVector);
+      end;
+
 
     constructor tarraydef.create_openarray;
       begin
@@ -4054,19 +4075,21 @@ implementation
       end;
 
 
-    class function tarraydef.getreusable(def: tdef; elems: asizeint): tarraydef;
+    class function tarraydef.getreusable_intern(def: tdef; elems: asizeint; const options: tarraydefoptions): tarraydef;
       var
         res: PHashSetItem;
         oldsymtablestack: tsymtablestack;
         arrdesc: packed record
           def: tdef;
           elecount: asizeint;
+          options: tarraydefoptions
         end;
       begin
         if not assigned(current_module) then
           internalerror(2011081301);
         arrdesc.def:=def;
         arrdesc.elecount:=elems;
+        arrdesc.options:=options;
         res:=current_module.arraydefs.FindOrAdd(@arrdesc,sizeof(arrdesc));
         if not assigned(res^.Data) then
           begin
@@ -4081,6 +4104,7 @@ implementation
             symtablestack:=nil;
             result:=carraydef.create(0,elems-1,sizesinttype);
             result.elementdef:=def;
+            result.arrayoptions:=options;
             setup_reusable_def(def,result,res,oldsymtablestack);
             { res^.Data may still be nil -> don't overwrite result }
             exit;
@@ -4089,9 +4113,28 @@ implementation
       end;
 
 
+    class function tarraydef.getreusable(def: tdef; elems: asizeint): tarraydef;
+      begin
+        result:=getreusable_intern(def,elems,[]);
+      end;
+
+
+    class function tarraydef.getreusable_vector(def: tdef; elems: asizeint): tarraydef;
+      begin
+        result:=getreusable_intern(def,elems,[ado_IsVector]);
+      end;
+
+
     class function tarraydef.getreusable_no_free(def: tdef; elems: asizeint): tarraydef;
       begin
         result:=getreusable(def,elems);
+        if not result.is_registered then
+          include(result.defoptions,df_not_registered_no_free);
+      end;
+
+    class function tarraydef.getreusable_no_free_vector(def: tdef; elems: asizeint): tarraydef;
+      begin
+        result:=getreusable_vector(def,elems);
         if not result.is_registered then
           include(result.defoptions,df_not_registered_no_free);
       end;
@@ -4125,7 +4168,7 @@ implementation
          ppufile.getderef(rangedefderef);
          lowrange:=ppufile.getasizeint;
          highrange:=ppufile.getasizeint;
-         ppufile.getsmallset(arrayoptions);
+         ppufile.getset(tppuset1(arrayoptions));
          ppuload_platform(ppufile);
          symtable:=tarraysymtable.create(self);
          tarraysymtable(symtable).ppuload(ppufile)
@@ -4165,7 +4208,7 @@ implementation
          ppufile.putderef(rangedefderef);
          ppufile.putasizeint(lowrange);
          ppufile.putasizeint(highrange);
-         ppufile.putsmallset(arrayoptions);
+         ppufile.putset(tppuset1(arrayoptions));
          writeentry(ppufile,ibarraydef);
          tarraysymtable(symtable).ppuwrite(ppufile);
       end;
@@ -4294,8 +4337,10 @@ implementation
 
     function tarraydef.alignment : shortint;
       begin
+        if ado_IsVector in arrayoptions then
+           alignment:=size
          { alignment of dyn. arrays doesn't depend on the element size }
-         if (ado_IsDynamicArray in arrayoptions) then
+         else if ado_IsDynamicArray in arrayoptions then
            alignment:=voidpointertype.alignment
          { alignment is the target alignment for the used load size }
          else if (ado_IsBitPacked in arrayoptions) and
@@ -4367,6 +4412,12 @@ implementation
         Result:=ado_IsDynamicArray in arrayoptions;
       end;
 
+
+    function tarraydef.is_hwvector: boolean;
+      begin
+        result:=ado_IsVector in arrayoptions;
+      end;
+
 {***************************************************************************
                               tabstractrecorddef
 ***************************************************************************}
@@ -4393,7 +4444,7 @@ implementation
         { only used for external C++ classes and Java classes/records }
         if (import_lib^='') then
           stringdispose(import_lib);
-        ppufile.getsmallset(objectoptions);
+        ppufile.getset(tppuset4(objectoptions));
       end;
 
     procedure tabstractrecorddef.ppuwrite(ppufile: tcompilerppufile);
@@ -4404,7 +4455,7 @@ implementation
           ppufile.putstring(import_lib^)
         else
           ppufile.putstring('');
-        ppufile.putsmallset(objectoptions);
+        ppufile.putset(tppuset4(objectoptions));
       end;
 
     destructor tabstractrecorddef.destroy;
@@ -4799,7 +4850,8 @@ implementation
           pname:=@n
         else
           begin
-            name:='$InternalRec'+tostr(current_module.deflist.count);
+            init_defid;
+            name:='$InternalRec'+unique_id_str;
             pname:=@name;
           end;
         oldsymtablestack:=symtablestack;
@@ -4901,7 +4953,7 @@ implementation
              trecordsymtable(symtable).recordalignmin:=shortint(ppufile.getbyte);
              trecordsymtable(symtable).datasize:=ppufile.getasizeint;
              trecordsymtable(symtable).paddingsize:=ppufile.getword;
-             ppufile.getsmallset(trecordsymtable(symtable).managementoperators);
+             ppufile.getset(tppuset1(trecordsymtable(symtable).managementoperators));
              { position of ppuload_platform call must correspond
                to position of writeentry in ppuwrite method }
              ppuload_platform(ppufile);
@@ -5059,7 +5111,7 @@ implementation
              ppufile.putbyte(byte(trecordsymtable(symtable).recordalignmin));
              ppufile.putasizeint(trecordsymtable(symtable).datasize);
              ppufile.putword(trecordsymtable(symtable).paddingsize);
-             ppufile.putsmallset(trecordsymtable(symtable).managementoperators);
+             ppufile.putset(tppuset1(trecordsymtable(symtable).managementoperators));
              { the variantrecdesc is needed only for iso-like new statements new(prec,1,2,3 ...);
                but because iso mode supports no units, there is no need to store the variantrecdesc
                in the ppu
@@ -5293,7 +5345,7 @@ implementation
          ppufile.getderef(returndefderef);
          proctypeoption:=tproctypeoption(ppufile.getbyte);
          proccalloption:=tproccalloption(ppufile.getbyte);
-         ppufile.getnormalset(procoptions);
+         ppufile.getset(tppuset8(procoptions));
 
          funcretloc[callerside].init;
          if po_explicitparaloc in procoptions then
@@ -5318,7 +5370,7 @@ implementation
          ppufile.do_interface_crc:=false;
          ppufile.putbyte(ord(proctypeoption));
          ppufile.putbyte(ord(proccalloption));
-         ppufile.putnormalset(procoptions);
+         ppufile.putset(tppuset8(procoptions));
          ppufile.do_interface_crc:=oldintfcrc;
 
          if (po_explicitparaloc in procoptions) then
@@ -5716,6 +5768,19 @@ implementation
       end;
 
 
+    function tabstractprocdef.generate_safecall_wrapper: boolean;
+      begin
+{$ifdef SUPPORT_SAFECALL}
+        result:=
+          (proccalloption=pocall_safecall) and
+          not(po_assembler in procoptions) and
+          (tf_safecall_exceptions in target_info.flags);
+{$else SUPPORT_SAFECALL}
+        result:=false;
+{$endif}
+      end;
+
+
 {***************************************************************************
                                   TPROCDEF
 ***************************************************************************}
@@ -5959,6 +6024,9 @@ implementation
          import_nr:=0;
          inlininginfo:=nil;
          deprecatedmsg:=nil;
+         genericdecltokenbuf:=nil;
+         if cs_opt_fastmath in current_settings.optimizerswitches then
+           include(implprocoptions, pio_fastmath);
       end;
 
 
@@ -5986,7 +6054,7 @@ implementation
          ppufile.getderef(procsymderef);
          ppufile.getposinfo(fileinfo);
          visibility:=tvisibility(ppufile.getbyte);
-         ppufile.getsmallset(symoptions);
+         ppufile.getset(tppuset2(symoptions));
          if sp_has_deprecated_msg in symoptions then
            deprecatedmsg:=ppufile.getpshortstring
          else
@@ -6008,12 +6076,12 @@ implementation
          if (po_dispid in procoptions) then
            dispid:=ppufile.getlongint;
          { inline stuff }
-         ppufile.getsmallset(implprocoptions);
+         ppufile.getset(tppuset1(implprocoptions));
          if has_inlininginfo then
            begin
              ppufile.getderef(funcretsymderef);
              new(inlininginfo);
-             ppufile.getsmallset(inlininginfo^.flags);
+             ppufile.getset(tppuset4(inlininginfo^.flags));
            end
          else
            begin
@@ -6159,7 +6227,7 @@ implementation
          ppufile.putderef(procsymderef);
          ppufile.putposinfo(fileinfo);
          ppufile.putbyte(byte(visibility));
-         ppufile.putsmallset(symoptions);
+         ppufile.putset(tppuset2(symoptions));
          if sp_has_deprecated_msg in symoptions then
            ppufile.putstring(deprecatedmsg^);
          { import }
@@ -6177,11 +6245,11 @@ implementation
          { inline stuff }
          oldintfcrc:=ppufile.do_crc;
          ppufile.do_crc:=false;
-         ppufile.putsmallset(implprocoptions);
+         ppufile.putset(tppuset1(implprocoptions));
          if has_inlininginfo then
            begin
              ppufile.putderef(funcretsymderef);
-             ppufile.putsmallset(inlininginfo^.flags);
+             ppufile.putset(tppuset4(inlininginfo^.flags));
            end;
 
          { count alias names }
@@ -6382,7 +6450,7 @@ implementation
       end;
 
 
-    function tprocdef.getfuncretsyminfo(out ressym: tsym; out resdef: tdef): boolean;
+    function tprocdef.get_funcretsym_info(out ressym: tsym; out resdef: tdef): boolean;
       begin
         result:=false;
         if proctypeoption=potype_constructor then
@@ -6394,12 +6462,33 @@ implementation
             if is_object(resdef) then
               resdef:=cpointerdef.getreusable(resdef);
           end
+        else if (proccalloption=pocall_safecall) and
+           (tf_safecall_exceptions in target_info.flags) then
+          begin
+            result:=true;
+            ressym:=tsym(localst.Find('safecallresult'));
+            resdef:=tabstractnormalvarsym(ressym).vardef;
+          end
         else if not is_void(returndef) then
           begin
             result:=true;
             ressym:=funcretsym;
             resdef:=tabstractnormalvarsym(ressym).vardef;
           end;
+      end;
+
+
+    function tprocdef.get_safecall_funcretsym_info(out ressym: tsym; out resdef: tdef): boolean;
+      begin
+        result:=false;
+        if (proctypeoption<>potype_constructor) and
+           (proccalloption=pocall_safecall) and
+           (tf_safecall_exceptions in target_info.flags) then
+          begin
+            result:=true;
+            ressym:=tsym(localst.Find('safecallresult'));
+            resdef:=tabstractnormalvarsym(ressym).vardef;
+          end
       end;
 
 
@@ -7230,6 +7319,8 @@ implementation
 
 
     destructor tobjectdef.destroy;
+      var
+        i: longint;
       begin
          if assigned(symtable) then
            begin
@@ -7250,7 +7341,8 @@ implementation
            end;
          if assigned(vmtentries) then
            begin
-             resetvmtentries;
+             for i:=0 to vmtentries.count-1 do
+               dispose(pvmtentry(vmtentries[i]));
              vmtentries.free;
              vmtentries:=nil;
            end;
@@ -7294,11 +7386,7 @@ implementation
             for i:=0 to ImplementedInterfaces.count-1 do
               tobjectdef(result).ImplementedInterfaces.Add(TImplementedInterface(ImplementedInterfaces[i]).Getcopy);
           end;
-        if assigned(vmtentries) then
-          begin
-            tobjectdef(result).vmtentries:=TFPList.Create;
-            tobjectdef(result).copyvmtentries(self);
-          end;
+        tobjectdef(result).copyvmtentries(self);
       end;
 
 
@@ -7499,22 +7587,13 @@ implementation
       end;
 
 
-    procedure tobjectdef.resetvmtentries;
-      var
-        i : longint;
-      begin
-        for i:=0 to vmtentries.Count-1 do
-          Dispose(pvmtentry(vmtentries[i]));
-        vmtentries.clear;
-      end;
-
-
     procedure tobjectdef.copyvmtentries(objdef:tobjectdef);
       var
         i : longint;
         vmtentry : pvmtentry;
       begin
-        resetvmtentries;
+        if vmtentries.count<>0 then
+          internalerror(2019081401);
         vmtentries.count:=objdef.vmtentries.count;
         for i:=0 to objdef.vmtentries.count-1 do
           begin

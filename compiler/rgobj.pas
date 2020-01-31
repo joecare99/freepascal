@@ -1597,7 +1597,11 @@ unit rgobj;
           { FIXME: temp variable r is needed here to avoid Internal error 20060521 }
           {        while compiling the compiler. }
           tmpr:=NR_STACK_POINTER_REG;
-          if regtype=getregtype(tmpr) then
+          { e.g. AVR does not have a stack pointer register }
+{$push}{$warnings off}
+          if (RS_STACK_POINTER_REG<>RS_INVALID) and
+{$pop}
+            (regtype=getregtype(tmpr)) then
             include(adj_colours,RS_STACK_POINTER_REG);
           {Assume a spill by default...}
           found:=false;
@@ -2047,29 +2051,6 @@ unit rgobj;
                               internalerror(2015040501);
 {$endif}
                             setsupreg(reg,u);
-                            {
-                              Remove sequences of release and
-                              allocation of the same register like. Other combinations
-                              of release/allocate need to stay in the list.
-
-                                 # Register X released
-                                 # Register X allocated
-                            }
-                            if assigned(previous) and
-                               (ratype=ra_alloc) and
-                               (Tai(previous).typ=ait_regalloc) and
-                               (Tai_regalloc(previous).reg=reg) and
-                               (Tai_regalloc(previous).ratype=ra_dealloc) then
-                              begin
-                                q:=Tai(next);
-                                hp:=tai(previous);
-                                list.remove(hp);
-                                hp.free;
-                                list.remove(p);
-                                p.free;
-                                p:=q;
-                                continue;
-                              end;
                           end;
                       end;
                   end;

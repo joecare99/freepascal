@@ -300,14 +300,14 @@ implementation
         sl       : tpropaccesslist;
         hs       : string;
       begin
+        storepos:=current_tokenpos;
+        current_tokenpos:=pd.fileinfo;
+
         { The result from constructors and destructors can't be accessed directly }
         if not(pd.proctypeoption in [potype_constructor,potype_destructor]) and
            not is_void(pd.returndef) and
            (not(po_assembler in pd.procoptions) or paramanager.asm_result_var(pd.returndef,pd)) then
          begin
-           storepos:=current_tokenpos;
-           current_tokenpos:=pd.fileinfo;
-
            { We need to insert a varsym for the result in the localst
              when it is returning in a register }
            { we also need to do this for a generic procdef as we didn't allow
@@ -348,8 +348,26 @@ implementation
               tlocalsymtable(pd.localst).insert(aliasvs);
             end;
 
-           current_tokenpos:=storepos;
          end;
+
+        if pd.generate_safecall_wrapper then
+          begin
+            { vo_is_funcret is necessary so the local only gets freed after we loaded its
+              value into the return register }
+            vs:=clocalvarsym.create('$safecallresult',vs_value,search_system_type('HRESULT').typedef,[vo_is_funcret]);
+            { do not put this variable in a register. The register which will be bound
+              to this symbol will not be allocated automatically. Which means it will
+              be re-used wich breaks the code. Besides this it is questionable if it is
+              an optimization if one of the registers is kept allocated during the complete
+              function, without ever using it.
+              (It would be better to re-write the safecall-support in such a way that this
+              variable it not needed at all, but that the HRESULT is set when the method
+              is finalized) }
+            vs.varregable:=vr_none;
+            pd.localst.insert(vs);
+          end;
+
+        current_tokenpos:=storepos;
       end;
 
 

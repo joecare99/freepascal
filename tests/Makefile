@@ -1837,7 +1837,7 @@ fpc_shared:
 ifdef HASSHAREDLIB
 	$(MAKE) all CREATESHARED=1 LINKSHARED=1 CREATESMART=1
 ifneq ($(SHARED_BUILD),n)
-	$(PPUMOVE) -q $(SHARED_LIBUNITS) -i$(COMPILER_UNITTARGETDIR) -o$(SHARED_FULLNAME) -d$(COMPILER_UNITTARGETDIR)
+	$(PPUMOVE) -q $(SHARED_LIBUNITS) -i$(COMPILER_UNITTARGETDIR) -o$(SHARED_FULLNAME) -d$(COMPILER_UNITTARGETDIR) -P$(BINUTILSPREFIX)
 endif
 else
 	@$(ECHO) Shared Libraries not supported
@@ -1864,8 +1864,10 @@ else
 override INSTALLPPULINKFILES:=$(subst $(PPUEXT),$(OEXT),$(INSTALLPPUFILES)) $(subst $(PPUEXT),$(LTOEXT),$(INSTALLPPUFILES)) $(addprefix $(STATICLIBPREFIX),$(subst $(PPUEXT),$(STATICLIBEXT),$(INSTALLPPUFILES)))
 endif
 ifneq ($(UNITTARGETDIRPREFIX),)
-override INSTALLPPUFILES:=$(addprefix $(UNITTARGETDIRPREFIX),$(notdir $(INSTALLPPUFILES)))
-override INSTALLPPULINKFILES:=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(notdir $(INSTALLPPULINKFILES))))
+override INSTALLPPUFILENAMES:=$(notdir $(INSTALLPPUFILES))
+override INSTALLPPULINKFILENAMES:=$(notdir $(INSTALLPPULINKFILES))
+override INSTALLPPUFILES=$(addprefix $(UNITTARGETDIRPREFIX),$(INSTALLPPUFILENAMES))
+override INSTALLPPULINKFILES=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(INSTALLPPULINKFILENAMES)))
 endif
 override INSTALL_CREATEPACKAGEFPC=1
 endif
@@ -1938,8 +1940,10 @@ override CLEANPPULINKFILES:=$(subst $(PPUEXT),$(OEXT),$(CLEANPPUFILES)) $(subst 
 ifdef DEBUGSYMEXT
 override CLEANPPULINKFILES+=$(subst $(PPUEXT),$(DEBUGSYMEXT),$(CLEANPPUFILES))
 endif
-override CLEANPPUFILES:=$(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPUFILES))
-override CLEANPPULINKFILES:=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPULINKFILES)))
+override CLEANPPUFILENAMES:=$(CLEANPPUFILES)
+override CLEANPPUFILES=$(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPUFILENAMES))
+override CLEANPPULINKFILENAMES:=$(CLEANPPULINKFILES)
+override CLEANPPULINKFILES=$(wildcard $(addprefix $(UNITTARGETDIRPREFIX),$(CLEANPPULINKFILENAMES)))
 endif
 fpc_clean: $(CLEANTARGET)
 ifdef CLEANEXEFILES
@@ -2234,7 +2238,7 @@ export LOG:=$(TEST_OUTPUTDIR)/log
 endif
 LOGFILES=$(TEST_OUTPUTDIR)/log $(TEST_OUTPUTDIR)/longlog $(TEST_OUTPUTDIR)/faillist
 LOGEXT=.testlog .tbslog .tbflog .webtbslog .webtbflog
-TESTUNITDIRS=system dos crt objects strings sysutils math sharemem strutils matrix lineinfo ucomplex fpwidestring cpu fmtbcd windows classes character dateutil fpcunit softfpu variants sortbase sortalgs
+TESTUNITDIRS=system dos crt objects strings sysutils math sharemem strutils matrix lineinfo ucomplex fpwidestring cpu fmtbcd windows classes character dateutil fpcunit softfpu variants sortbase sortalgs linux unixutil
 TESTDIRECTDIRS=
 TESTSUBDIRS=cg cg/variants cg/cdecl cpu16 cpu16/i8086 library opt $(addprefix units/,$(TESTUNITDIRS))
 TESTPACKAGESDIRS=win-base webtbs hash fcl-registry fcl-process zlib fcl-db fcl-xml cocoaint bzip2
@@ -2536,6 +2540,9 @@ SVN_COMPILER_REV_STR=$(shell $(SVNVERSION) -c ../compiler)
 SVN_RTL_REV_STR=$(shell $(SVNVERSION) -c ../rtl)
 SVN_PACKAGES_REV_STR=$(shell $(SVNVERSION) -c ../packages)
 endif
+ifeq ($(TEST_COMMENT),)
+TEST_COMMENT=$(TEST_OPT)
+endif
 $(TEST_OUTPUTDIR)/dbdigest.cfg:
 	$(ECHOREDIR) OS=$(TEST_OS_TARGET) > $(TEST_OUTPUTDIR)/dbdigest.cfg
 	$(ECHOREDIR) CPU=$(TEST_CPU_TARGET) >> $(TEST_OUTPUTDIR)/dbdigest.cfg
@@ -2546,7 +2553,7 @@ ifneq ($(TEST_USE_LONGLOG),)
 endif
 	$(ECHOREDIR) Submitter=$(TEST_USER) >> $(TEST_OUTPUTDIR)/dbdigest.cfg
 	$(ECHOREDIR) Machine=$(TEST_HOSTNAME) >> $(TEST_OUTPUTDIR)/dbdigest.cfg
-	$(ECHOREDIR) Comment=$(TEST_OPT) >> $(TEST_OUTPUTDIR)/dbdigest.cfg
+	$(ECHOREDIR) Comment=$(TEST_COMMENT) >> $(TEST_OUTPUTDIR)/dbdigest.cfg
 ifneq ($(TEST_DATETIME),)
 	$(ECHOREDIR) Date=$(TEST_DATETIME) >> $(TEST_OUTPUTDIR)/dbdigest.cfg
 endif

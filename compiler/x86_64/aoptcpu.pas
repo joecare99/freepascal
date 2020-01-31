@@ -35,7 +35,6 @@ type
     function PeepHoleOptPass1Cpu(var p: tai): boolean; override;
     function PeepHoleOptPass2Cpu(var p: tai): boolean; override;
     function PostPeepHoleOptsCpu(var p : tai) : boolean; override;
-    procedure PostPeepHoleOpts; override;
   end;
 
 implementation
@@ -79,16 +78,15 @@ uses
                 A_MOVSX,
                 A_MOVZX:
                   Result:=OptPass1Movx(p);
+                A_MOVAPD,
+                A_MOVAPS,
+                A_MOVUPD,
+                A_MOVUPS,
                 A_VMOVAPS,
                 A_VMOVAPD,
                 A_VMOVUPS,
                 A_VMOVUPD:
-                  result:=OptPass1VMOVAP(p);
-                A_MOVAPD,
-                A_MOVAPS,
-                A_MOVUPD,
-                A_MOVUPS:
-                  result:=OptPass1MOVAP(p);
+                  result:=OptPass1_V_MOVAP(p);
                 A_VDIVSD,
                 A_VDIVSS,
                 A_VSUBSD,
@@ -126,6 +124,8 @@ uses
                   result:=OptPass1FSTP(p);
                 A_FLD:
                   result:=OptPass1FLD(p);
+                A_CMP:
+                  result:=OptPass1Cmp(p);
                 else
                   ;
               end;
@@ -152,6 +152,10 @@ uses
                   Result:=OptPass2Jmp(p);
                 A_Jcc:
                   Result:=OptPass2Jcc(p);
+                A_Lea:
+                  Result:=OptPass2Lea(p);
+                A_SUB:
+                  Result:=OptPass2SUB(p);
                 else
                   ;
               end;
@@ -171,6 +175,8 @@ uses
               case taicpu(p).opcode of
                 A_MOV:
                   Result:=PostPeepholeOptMov(p);
+                A_MOVSX:
+                  Result:=PostPeepholeOptMOVSX(p);
                 A_MOVZX:
                   Result:=PostPeepholeOptMovzx(p);
                 A_CMP:
@@ -187,18 +193,18 @@ uses
                 else
                   ;
               end;
+
+              { Optimise any reference-type operands (if Result is True, the
+                instruction will be checked on the next iteration) }
+              if not Result then
+                OptimizeRefs(taicpu(p));
+
             end;
           else
             ;
         end;
       end;
 
-
-    procedure TCpuAsmOptimizer.PostPeepHoleOpts;
-      begin
-        inherited;
-        OptReferences;
-      end;
 
 begin
   casmoptimizer := TCpuAsmOptimizer;

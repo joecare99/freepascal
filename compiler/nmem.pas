@@ -159,7 +159,7 @@ implementation
 
     uses
       globtype,systems,constexp,
-      cutils,verbose,globals,
+      cutils,verbose,globals,ppu,
       symconst,defutil,defcmp,
       nadd,nbas,nflw,nutils,objcutil,
       wpobase,
@@ -438,7 +438,7 @@ implementation
       begin
         inherited ppuload(t,ppufile);
         ppufile.getderef(getprocvardefderef);
-        ppufile.getsmallset(addrnodeflags);
+        ppufile.getset(tppuset1(addrnodeflags));
       end;
 
 
@@ -446,7 +446,7 @@ implementation
       begin
         inherited ppuwrite(ppufile);
         ppufile.putderef(getprocvardefderef);
-        ppufile.putsmallset(addrnodeflags);
+        ppufile.putset(tppuset1(addrnodeflags));
       end;
 
     procedure Taddrnode.mark_write;
@@ -535,6 +535,22 @@ implementation
 
 
     function taddrnode.pass_typecheck:tnode;
+
+      procedure check_mark_read_written;
+        begin
+          if mark_read_written then
+            begin
+              { This is actually only "read", but treat it nevertheless as
+                modified due to the possible use of pointers
+                To avoid false positives regarding "uninitialised"
+                warnings when using arrays, perform it in two steps         }
+              set_varstate(left,vs_written,[]);
+              { vsf_must_be_valid so it doesn't get changed into
+                vsf_referred_not_inited                          }
+              set_varstate(left,vs_read,[vsf_must_be_valid]);
+            end;
+        end;
+
       var
          hp : tnode;
          hsym : tfieldvarsym;
@@ -629,9 +645,11 @@ implementation
               end
             else
               begin
+                check_mark_read_written;
                 { Return the typeconvn only }
                 result:=left;
                 left:=nil;
+                exit;
               end;
           end
         else
@@ -650,17 +668,8 @@ implementation
               CGMessage(type_e_variable_id_expected);
           end;
 
-        if mark_read_written then
-          begin
-            { This is actually only "read", but treat it nevertheless as  }
-            { modified due to the possible use of pointers                }
-            { To avoid false positives regarding "uninitialised"          }
-            { warnings when using arrays, perform it in two steps         }
-            set_varstate(left,vs_written,[]);
-            { vsf_must_be_valid so it doesn't get changed into }
-            { vsf_referred_not_inited                          }
-            set_varstate(left,vs_read,[vsf_must_be_valid]);
-          end;
+        check_mark_read_written;
+
         if not(assigned(result)) then
           result:=simplify(false);
       end;
